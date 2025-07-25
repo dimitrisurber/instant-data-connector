@@ -8,7 +8,7 @@ import sys
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
 
-from instant_connector import DataAggregator, MLOptimizer, PickleManager
+from instant_connector import InstantDataConnector, MLOptimizer, PickleManager
 from instant_connector.pickle_manager import load_data_connector
 
 
@@ -17,12 +17,17 @@ def example_1_simple_file_aggregation():
     print("\n=== Example 1: Simple File Aggregation ===")
     
     # Create aggregator
-    aggregator = DataAggregator()
+    aggregator = InstantDataConnector()
     
     # Add CSV files
     aggregator.add_file_source(
         name='sales_data',
-        file_paths=['data/sales_q1.csv', 'data/sales_q2.csv'],
+        file_path='data/sales_q1.csv',
+        read_options={'parse_dates': ['date']}
+    )
+    aggregator.add_file_source(
+        name='sales_data_q2',
+        file_path='data/sales_q2.csv',
         read_options={'parse_dates': ['date']}
     )
     
@@ -41,7 +46,7 @@ def example_2_database_with_optimization():
     print("\n=== Example 2: Database with ML Optimization ===")
     
     # Create aggregator
-    aggregator = DataAggregator()
+    aggregator = InstantDataConnector()
     
     # Add database source
     aggregator.add_database_source(
@@ -72,20 +77,24 @@ def example_2_database_with_optimization():
     data = aggregator.extract_data()
     
     # Apply ML optimizations
-    optimized = aggregator.optimize_datasets(
+    optimizer = MLOptimizer(
         handle_missing='auto',
         encode_categorical='auto',
         scale_numeric='standard',
         remove_low_variance=True
     )
     
+    for name, df in data.items():
+        data[name] = optimizer.fit_transform(df)
+    
+    aggregator.datasets = data
+    
     # Save with compression
     stats = aggregator.save_connector(
-        'output/analytics_ml_ready.pkl.lz4',
-        optimize_for_size=True
+        'output/analytics_ml_ready.pkl.lz4'
     )
     
-    print(f"Original size: {stats['original_size_mb']:.2f} MB")
+    print(f"Original size: {stats['uncompressed_size_mb']:.2f} MB")
     print(f"Compressed size: {stats['file_size_mb']:.2f} MB")
 
 
@@ -94,7 +103,7 @@ def example_3_multi_source_aggregation():
     print("\n=== Example 3: Multi-Source Aggregation ===")
     
     # Create aggregator with config file
-    aggregator = DataAggregator(config_path='config/sources.yaml')
+    aggregator = InstantDataConnector(config_path='config/sources.yaml')
     
     # Add additional API source programmatically
     aggregator.add_api_source(
@@ -112,11 +121,10 @@ def example_3_multi_source_aggregation():
         }
     )
     
-    # Run complete pipeline
-    save_stats = aggregator.aggregate_and_save(
-        output_path='output/multi_source_data.pkl.lz4',
-        optimize=True,
-        compression='lz4'
+    # Extract and save data
+    data = aggregator.extract_data()
+    save_stats = aggregator.save_connector(
+        'output/multi_source_data.pkl.lz4'
     )
     
     print(f"Aggregated data saved: {save_stats['file_path']}")
@@ -135,14 +143,14 @@ def example_4_loading_and_using_data():
         print(f"Columns: {df.columns.tolist()}")
         print(f"Memory usage: {df.memory_usage(deep=True).sum() / 1024**2:.2f} MB")
     
-    # Load with metadata
-    data, metadata = load_data_connector(
-        'output/multi_source_data.pkl.lz4',
-        return_metadata=True
-    )
+    # Load with timing
+    import time
+    start_time = time.time()
+    data = load_data_connector('output/multi_source_data.pkl.lz4')
+    load_time = time.time() - start_time
     
-    print(f"\nTotal datasets: {metadata['dataset_count']}")
-    print(f"Load time: {metadata['load_time_seconds']:.2f} seconds")
+    print(f"\nTotal datasets: {len(data)}")
+    print(f"Load time: {load_time:.2f} seconds")
     
     # Use for ML
     df = data['analytics_db_user_behavior']
@@ -182,15 +190,16 @@ def example_5_custom_ml_preprocessing():
     # Create ML optimizer
     optimizer = MLOptimizer()
     
-    # Apply optimizations
-    df_optimized = optimizer.optimize_dataframe(
-        df,
-        target_column='target',
+    # Configure and apply optimizations
+    optimizer = MLOptimizer(
         handle_missing='median',
         encode_categorical='onehot',
         scale_numeric='standard',
         remove_low_variance=False
     )
+    
+    df_optimized = optimizer.fit_transform(df.drop('target', axis=1))
+    df_optimized['target'] = df['target']
     
     print("\nOriginal DataFrame:")
     print(df)

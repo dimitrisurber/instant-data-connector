@@ -13,7 +13,7 @@ import time
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
 
-from instant_connector import DataAggregator, MLOptimizer, PickleManager
+from instant_connector import InstantDataConnector, MLOptimizer, PickleManager
 from instant_connector.pickle_manager import load_data_connector
 
 
@@ -75,15 +75,12 @@ def example_classification_workflow():
     clf_data, _ = create_sample_ml_data()
     
     # Step 2: Set up aggregator and optimizer
-    aggregator = DataAggregator()
+    aggregator = InstantDataConnector()
     aggregator.datasets = {'classification': clf_data}
     
     # Step 3: Apply ML optimizations
     print("\n2. Applying ML optimizations...")
-    optimizer = MLOptimizer()
-    optimized_data = aggregator.optimize_datasets(
-        optimizer=optimizer,
-        target_column='target',
+    optimizer = MLOptimizer(
         handle_missing='auto',
         encode_categorical='auto',
         scale_numeric='standard',
@@ -91,13 +88,18 @@ def example_classification_workflow():
         remove_high_correlation=True
     )
     
+    # Separate target column and apply optimization
+    target_data = clf_data['target'].copy()
+    features_data = clf_data.drop('target', axis=1)
+    optimized_features = optimizer.fit_transform(features_data)
+    optimized_features['target'] = target_data
+    
+    aggregator.datasets = {'classification': optimized_features}
+    
     # Step 4: Save optimized data
     print("\n3. Saving ML-ready data...")
-    pickle_manager = PickleManager(compression='lz4')
     save_stats = aggregator.save_connector(
-        'output/classification_data.pkl.lz4',
-        pickle_manager=pickle_manager,
-        optimize_for_size=True
+        'output/classification_data.pkl.lz4'
     )
     
     print(f"   Saved {save_stats['file_size_mb']:.2f} MB")
@@ -167,22 +169,25 @@ def example_regression_workflow():
     _, reg_data = create_sample_ml_data()
     
     # Step 2: Save directly with aggregator
-    aggregator = DataAggregator()
+    aggregator = InstantDataConnector()
     aggregator.datasets = {'house_prices': reg_data}
     
-    # Step 3: One-line preprocessing and save
-    print("\n2. Preprocessing and saving in one step...")
-    save_stats = aggregator.aggregate_and_save(
-        'output/regression_data.pkl.lz4',
-        optimize=True,
-        compression='lz4',
-        optimizer_kwargs={
-            'target_column': 'price',
-            'handle_missing': 'auto',
-            'encode_categorical': 'onehot',
-            'scale_numeric': 'robust',  # Robust scaler for regression
-        }
+    # Step 3: Apply ML optimizations and save
+    print("\n2. Preprocessing and saving...")
+    optimizer = MLOptimizer(
+        handle_missing='auto',
+        encode_categorical='onehot',
+        scale_numeric='robust',  # Robust scaler for regression
     )
+    
+    # Separate target and optimize features
+    target_data = reg_data['price'].copy()
+    features_data = reg_data.drop('price', axis=1)
+    optimized_features = optimizer.fit_transform(features_data)
+    optimized_features['price'] = target_data
+    
+    aggregator.datasets = {'house_prices': optimized_features}
+    save_stats = aggregator.save_connector('output/regression_data.pkl.lz4')
     
     # Step 4: Instant loading for ML
     print("\n3. Loading for machine learning...")
@@ -249,26 +254,31 @@ def example_large_dataset_workflow():
     
     # Save with optimization
     print("\n2. Optimizing and saving...")
-    aggregator = DataAggregator()
+    aggregator = InstantDataConnector()
     aggregator.datasets = {'large_dataset': large_data}
     
     start_time = time.time()
-    save_stats = aggregator.aggregate_and_save(
-        'output/large_dataset.pkl.lz4',
-        optimize=True,
-        compression='lz4',
-        optimizer_kwargs={
-            'target_column': 'target',
-            'handle_missing': 'drop',
-            'encode_categorical': 'label',  # Label encoding for high cardinality
-            'scale_numeric': None,  # Skip scaling for speed
-            'remove_low_variance': True,
-            'remove_high_correlation': True
-        }
+    
+    # Apply optimizations
+    optimizer = MLOptimizer(
+        handle_missing='drop',
+        encode_categorical='label',  # Label encoding for high cardinality
+        scale_numeric=None,  # Skip scaling for speed
+        remove_low_variance=True,
+        remove_high_correlation=True
     )
     
+    # Separate target and optimize
+    target_data = large_data['target'].copy()
+    features_data = large_data.drop('target', axis=1)
+    optimized_features = optimizer.fit_transform(features_data)
+    optimized_features['target'] = target_data
+    
+    aggregator.datasets = {'large_dataset': optimized_features}
+    save_stats = aggregator.save_connector('output/large_dataset.pkl.lz4')
+    
     print(f"   Processing time: {time.time() - start_time:.2f} seconds")
-    print(f"   Original size: {save_stats['original_size_mb']:.2f} MB")
+    print(f"   Original size: {save_stats['uncompressed_size_mb']:.2f} MB")
     print(f"   Compressed size: {save_stats['file_size_mb']:.2f} MB")
     print(f"   Compression ratio: {save_stats['compression_ratio']:.2f}x")
     
@@ -293,13 +303,17 @@ def example_iterative_ml_development():
     
     # For demo, create and save some data first
     clf_data, _ = create_sample_ml_data()
-    aggregator = DataAggregator()
-    aggregator.datasets = {'experiment_v1': clf_data}
-    aggregator.aggregate_and_save(
-        'output/experiment_v1.pkl.lz4',
-        optimize=True,
-        optimizer_kwargs={'target_column': 'target'}
-    )
+    aggregator = InstantDataConnector()
+    
+    # Apply basic optimization
+    optimizer = MLOptimizer()
+    target_data = clf_data['target'].copy()
+    features_data = clf_data.drop('target', axis=1)
+    optimized_features = optimizer.fit_transform(features_data)
+    optimized_features['target'] = target_data
+    
+    aggregator.datasets = {'experiment_v1': optimized_features}
+    aggregator.save_connector('output/experiment_v1.pkl.lz4')
     
     # Now the actual workflow - instant loading
     data = load_data_connector('output/experiment_v1.pkl.lz4')

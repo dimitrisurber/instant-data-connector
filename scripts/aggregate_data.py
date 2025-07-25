@@ -9,7 +9,7 @@ from pathlib import Path
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
 
-from instant_connector import DataAggregator, MLOptimizer, PickleManager
+from instant_connector import InstantDataConnector, MLOptimizer, PickleManager
 
 
 def setup_logging(verbose: bool = False):
@@ -109,7 +109,7 @@ def main():
     setup_logging(args.verbose)
     
     # Create aggregator
-    aggregator = DataAggregator(config_path=args.config)
+    aggregator = InstantDataConnector(config_path=args.config)
     
     # Add sources from command line
     if args.database:
@@ -134,7 +134,8 @@ def main():
             )
     
     if args.files:
-        aggregator.add_file_source('cli_files', args.files)
+        for i, file_path in enumerate(args.files):
+            aggregator.add_file_source(f'cli_file_{i}', file_path)
     
     if args.api:
         base_url, endpoint, method = args.api
@@ -157,13 +158,22 @@ def main():
     
     # Run aggregation pipeline
     try:
-        save_stats = aggregator.aggregate_and_save(
-            args.output,
-            optimize=not args.no_optimize,
-            compression=args.compression,
-            compression_level=args.compression_level,
-            optimizer_kwargs=optimizer_kwargs
-        )
+        # Extract data
+        data = aggregator.extract_data()
+        
+        # Apply optimization if requested
+        if not args.no_optimize:
+            optimizer = MLOptimizer(
+                handle_missing=args.handle_missing,
+                encode_categorical=args.encode_categorical if args.encode_categorical != 'none' else None,
+                scale_numeric=args.scale_numeric if args.scale_numeric != 'none' else None,
+            )
+            
+            for name, df in data.items():
+                data[name] = optimizer.fit_transform(df)
+        
+        aggregator.datasets = data
+        save_stats = aggregator.save_connector(args.output)
         
         # Print summary
         print(f"\n✅ Data aggregation complete!")

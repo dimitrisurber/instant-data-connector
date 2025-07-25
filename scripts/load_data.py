@@ -60,22 +60,24 @@ def main():
     
     try:
         # Load data
+        import time
+        start_time = time.time()
+        
+        data = load_data_connector(str(pickle_path))
+        
+        # Filter datasets if specified
+        if args.datasets:
+            data = {name: df for name, df in data.items() if name in args.datasets}
+        
+        load_time = time.time() - start_time
+        
         if args.info:
-            data, metadata = load_data_connector(
-                pickle_path,
-                dataset_names=args.datasets,
-                return_metadata=True
-            )
-            
-            print("\n📊 Connector Metadata:")
+            print("\n📊 Connector Information:")
             print("-" * 50)
-            pprint(metadata)
+            print(f"Load time: {load_time:.3f} seconds")
+            print(f"Total datasets: {len(data)}")
+            print(f"File size: {pickle_path.stat().st_size / 1024**2:.2f} MB")
             print("-" * 50)
-        else:
-            data = load_data_connector(
-                pickle_path,
-                dataset_names=args.datasets
-            )
         
         print(f"\n✅ Loaded {len(data)} datasets from {pickle_path.name}")
         
