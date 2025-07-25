@@ -1,0 +1,84 @@
+# Example configuration file for Instant Data Connector
+# This file defines data sources and extraction queries
+
+sources:
+  # PostgreSQL database example
+  sales_db:
+    type: database
+    connection:
+      db_type: postgresql
+      host: localhost
+      port: 5432
+      database: sales
+      username: user
+      password: password
+    queries:
+      customers: |
+        SELECT customer_id, name, email, created_at, country
+        FROM customers
+        WHERE created_at >= '2023-01-01'
+      orders: |
+        SELECT order_id, customer_id, order_date, total_amount, status
+        FROM orders
+        WHERE order_date >= '2023-01-01'
+      products: |
+        SELECT product_id, name, category, price, stock_quantity
+        FROM products
+        WHERE active = true
+
+  # CSV files example
+  csv_data:
+    type: file
+    paths:
+      - data/sales_2023.csv
+      - data/sales_2024.csv
+    read_options:
+      parse_dates: ['date']
+      low_memory: false
+
+  # Excel file example
+  excel_reports:
+    type: file
+    paths:
+      - reports/quarterly_report.xlsx
+    read_options:
+      sheet_name: 'Sales Data'
+
+  # REST API example
+  weather_api:
+    type: api
+    base_url: https://api.weather.example.com/v1
+    headers:
+      Authorization: Bearer YOUR_API_KEY
+    rate_limit_delay: 1.0
+    endpoints:
+      current_weather:
+        endpoint: weather/current
+        method: GET
+        params:
+          city: New York
+          units: metric
+      forecast:
+        endpoint: weather/forecast
+        method: GET
+        params:
+          city: New York
+          days: 7
+        paginate: true
+        pagination_type: page
+        max_pages: 10
+
+# ML optimization settings (optional)
+optimization:
+  handle_missing: auto
+  encode_categorical: auto
+  scale_numeric: standard
+  remove_low_variance: true
+  remove_high_correlation: true
+  correlation_threshold: 0.95
+
+# Output settings (optional)
+output:
+  compression: lz4
+  compression_level: 0
+  optimize_for_size: true

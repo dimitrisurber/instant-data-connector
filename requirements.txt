@@ -1,0 +1,43 @@
+# Core dependencies - Updated for 2024-2025
+pandas>=2.1.0,<3.0.0  # Latest stable, Python 3.11-3.13 compatible
+numpy>=1.24.0,<3.0.0  # NumPy 2.x series with Python 3.11-3.13 support
+PyYAML>=6.0.2  # Latest stable version
+
+# Database connectors
+sqlalchemy>=2.0.0,<3.0.0  # SQLAlchemy 2.0.41 (latest)
+psycopg2-binary>=2.9.10  # PostgreSQL - latest with Python 3.13 support
+pymysql>=1.1.0  # MySQL - latest stable
+
+# File format support
+openpyxl>=3.1.5  # Excel files - latest version
+pyarrow>=15.0.0  # Parquet files - latest stable
+# Note: xlrd removed - use openpyxl or pandas for Excel files
+
+# Compression
+lz4>=4.4.0  # Latest stable version
+
+# API support - Compatible versions to avoid warnings
+requests>=2.32.0  # Latest stable
+urllib3>=2.0.0,<3.0.0  # Compatible with requests
+
+# ML preprocessing
+scikit-learn>=1.5.0  # Latest with Python 3.11-3.13 support
+
+# Optional: encoding detection for CSV files
+chardet>=5.2.0  # Latest stable
+
+# Development and testing dependencies
+pytest>=8.0.0  # Latest stable
+pytest-cov>=4.0.0  # Coverage plugin
+pytest-xdist>=3.0.0  # Parallel test execution
+black>=24.0.0  # Code formatter
+flake8>=7.0.0  # Linting
+mypy>=1.8.0  # Type checking
+
+# Optional compression algorithms
+zstandard>=0.22.0  # High-performance compression
+
+# Security dependencies
+cryptography>=42.0.0  # Encryption and secure credential management
+keyring>=25.0.0  # System credential storage
+psutil>=5.9.0  # System resource monitoring
