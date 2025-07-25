@@ -652,8 +652,9 @@ class InstantDataConnector:
         }
         
         if self.use_secure_serialization:
-            # Use secure serializer
-            return self.serializer.serialize_datasets(data_to_save, output_path, **kwargs)
+            # Use secure serializer - filter out unsupported kwargs
+            secure_kwargs = {k: v for k, v in kwargs.items() if k in ['add_metadata', 'validate']}
+            return self.serializer.serialize_datasets(data_to_save, output_path, **secure_kwargs)
         else:
             # Use legacy pickle manager (deprecated)
             logger.warning("Using legacy pickle serialization - consider enabling secure serialization")

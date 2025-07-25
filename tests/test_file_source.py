@@ -301,9 +301,9 @@ class TestFileSource:
         source = FileSource([])
         
         df = pd.DataFrame({
-            'int64_col': np.array([1, 2, 3], dtype='int64'),
-            'float64_col': np.array([1.0, 2.0, 3.0], dtype='float64'),
-            'float_as_int': np.array([1.0, 2.0, 3.0], dtype='float64'),
+            'int64_col': np.array([1, 2, 3, 4, 5], dtype='int64'),
+            'float64_col': np.array([1.0, 2.0, 3.0, 4.0, 5.0], dtype='float64'),
+            'float_as_int': np.array([1.0, 2.0, 3.0, 4.0, 5.0], dtype='float64'),
             'cat_col': ['A', 'B', 'A', 'B', 'A'],
             '_metadata': ['skip', 'skip', 'skip', 'skip', 'skip']
         })
@@ -494,7 +494,12 @@ class TestFileSource:
         
         # Mock file size to trigger large file warning
         with patch.object(Path, 'stat') as mock_stat:
-            mock_stat.return_value.st_size = 600 * 1024 * 1024  # 600 MB
+            # Create a proper mock stat result
+            import stat
+            mock_stat_result = Mock()
+            mock_stat_result.st_size = 600 * 1024 * 1024  # 600 MB
+            mock_stat_result.st_mode = stat.S_IFREG | 0o644  # Regular file
+            mock_stat.return_value = mock_stat_result
             
             source = FileSource(temp_path)
             # Should not raise, just log warning

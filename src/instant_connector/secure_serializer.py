@@ -165,9 +165,27 @@ class SecureSerializer:
         memory_usage = df.memory_usage(deep=True).sum()
         self._validate_memory_usage(memory_usage)
         
+        # Convert DataFrame to dict, handling timestamps
+        df_copy = df.copy()
+        
+        # Convert datetime columns to ISO strings for JSON serialization
+        for col in df_copy.columns:
+            if pd.api.types.is_datetime64_any_dtype(df_copy[col]):
+                df_copy[col] = df_copy[col].dt.strftime('%Y-%m-%d %H:%M:%S')
+            elif df_copy[col].dtype == 'object':
+                # Check if any values are Timestamp objects
+                def convert_timestamp(x):
+                    if pd.isna(x):
+                        return x
+                    elif hasattr(x, 'strftime'):  # Timestamp-like object
+                        return x.strftime('%Y-%m-%d %H:%M:%S')
+                    else:
+                        return x
+                df_copy[col] = df_copy[col].apply(convert_timestamp)
+        
         return {
             'type': 'DataFrame',
-            'data': df.to_dict('records'),
+            'data': df_copy.to_dict('records'),
             'columns': list(df.columns),
             'dtypes': {col: str(dtype) for col, dtype in df.dtypes.items()},
             'index': df.index.tolist() if hasattr(df.index, 'tolist') else list(df.index),

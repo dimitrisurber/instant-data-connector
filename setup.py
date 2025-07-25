@@ -17,12 +17,12 @@ if requirements_file.exists():
 setup(
     name="instant-data-connector",
     version="0.1.0",
-    author="Your Name",
-    author_email="your.email@example.com",
+    author="Dimitri Surber",
+    author_email="dimitri@ikigai2.com",
     description="ML-optimized data aggregation and serialization for instant algorithm development",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/yourusername/instant-data-connector",
+    url="https://github.com/dimitrisurber/instant-data-connector",
     packages=find_packages(where="src"),
     package_dir={"": "src"},
     classifiers=[
