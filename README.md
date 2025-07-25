@@ -1,6 +1,6 @@
 # Instant Data Connector
 
-A Python library for aggregating data from multiple sources and serializing it into ML-optimized pickle files for instant algorithm development. Load preprocessed, ML-ready datasets in seconds instead of minutes.
+A Python library for aggregating data from multiple sources and serializing it into ML-optimized formats for instant algorithm development. Load preprocessed, ML-ready datasets in seconds instead of minutes.
 
 ## Table of Contents
 
@@ -23,11 +23,13 @@ A Python library for aggregating data from multiple sources and serializing it i
 
 - **Multi-Source Aggregation**: Extract data from databases (PostgreSQL, MySQL, SQLite), files (CSV, Excel, JSON, Parquet), and REST APIs
 - **ML-Ready Preprocessing**: Automatic handling of missing values, categorical encoding, feature scaling, and dimensionality reduction
-- **Efficient Serialization**: Compressed pickle files with LZ4, GZIP, or BZ2 compression (2-10x compression ratios)
+- **Secure Serialization**: Compressed formats with LZ4, GZIP, BZ2, or ZSTD compression (2-10x compression ratios)
 - **Instant Loading**: Load preprocessed datasets in seconds, not minutes (10-100x faster)
 - **Memory Optimization**: Automatic dtype optimization for reduced memory usage
 - **Metadata Tracking**: Store preprocessing steps, statistics, and source information
 - **Large Dataset Support**: Efficiently handle datasets from 100MB to 10GB
+- **Security Features**: Secure credential management and encrypted serialization
+- **Resource Monitoring**: Built-in memory and processing limits
 
 ## Installation
 
@@ -41,34 +43,36 @@ python setup.py install
 
 ### Dependencies:
 - Python 3.8+
-- pandas, numpy, PyYAML
-- sqlalchemy, psycopg2-binary, pymysql (for databases)
-- openpyxl, xlrd, pyarrow (for file formats)
-- lz4 (for compression)
-- requests (for APIs)
-- scikit-learn (for ML preprocessing)
+- pandas>=2.1.0, numpy>=1.24.0, PyYAML>=6.0.2
+- sqlalchemy>=2.0.0, psycopg2-binary>=2.9.10, pymysql>=1.1.0 (for databases)
+- openpyxl>=3.1.5, pyarrow>=15.0.0 (for file formats)
+- lz4>=4.4.0, zstandard>=0.22.0 (for compression)
+- requests>=2.32.0 (for APIs)
+- scikit-learn>=1.5.0 (for ML preprocessing)
+- cryptography>=42.0.0, keyring>=25.0.0 (for security)
 
 ## Quick Start
 
 ### 1. Simple File Aggregation
 
 ```python
-from instant_connector import DataAggregator
+from instant_connector import InstantDataConnector
+from instant_connector.pickle_manager import load_data_connector
 
-# Create aggregator
-aggregator = DataAggregator()
+# Create connector
+connector = InstantDataConnector()
 
-# Add CSV files
-aggregator.add_file_source(
+# Add file source (single file)
+connector.add_file_source(
     name='sales_data',
-    file_paths=['sales_2023.csv', 'sales_2024.csv']
+    file_path='sales_2023.csv'
 )
 
-# Extract, optimize, and save
-aggregator.aggregate_and_save('sales_data.pkl.lz4')
+# Extract and save
+raw_data = connector.extract_data()
+save_stats = connector.save_connector('sales_data.pkl.lz4')
 
 # Load instantly later
-from instant_connector.pickle_manager import load_data_connector
 data = load_data_connector('sales_data.pkl.lz4')
 df = data['sales_data_data']  # Access your DataFrame
 ```
@@ -76,8 +80,13 @@ df = data['sales_data_data']  # Access your DataFrame
 ### 2. Database with ML Optimization
 
 ```python
+from instant_connector import InstantDataConnector, MLOptimizer
+
+# Create connector
+connector = InstantDataConnector()
+
 # Add database source
-aggregator.add_database_source(
+connector.add_database_source(
     name='analytics_db',
     connection_params={
         'db_type': 'postgresql',
@@ -93,25 +102,30 @@ aggregator.add_database_source(
     }
 )
 
-# Save with ML optimizations
-aggregator.aggregate_and_save(
-    'ml_ready_data.pkl.lz4',
-    optimize=True,
-    optimizer_kwargs={
-        'handle_missing': 'auto',
-        'encode_categorical': 'auto',
-        'scale_numeric': 'standard',
-        'remove_low_variance': True,
-        'remove_high_correlation': True
-    }
+# Extract data
+raw_data = connector.extract_data()
+
+# Apply ML optimizations
+optimizer = MLOptimizer(
+    handle_missing='auto',
+    encode_categorical='auto',
+    scale_numeric='standard'
 )
+
+for dataset_name, df in raw_data.items():
+    result = optimizer.fit_transform(df)
+    optimized_df = result.get('X_processed', df)
+    connector.raw_data[dataset_name] = optimized_df
+
+# Save with compression
+save_stats = connector.save_connector('ml_ready_data.pkl.lz4')
 ```
 
 ### 3. API Data Aggregation
 
 ```python
 # Add API source with pagination
-aggregator.add_api_source(
+connector.add_api_source(
     name='customer_api',
     base_url='https://api.example.com/v1',
     headers={'Authorization': 'Bearer YOUR_TOKEN'},
@@ -137,7 +151,7 @@ Supported databases: PostgreSQL, MySQL, SQLite
 
 ```python
 # PostgreSQL
-aggregator.add_database_source(
+connector.add_database_source(
     name='postgres_db',
     connection_params={
         'db_type': 'postgresql',
@@ -149,11 +163,13 @@ aggregator.add_database_source(
     },
     queries={
         'query_name': 'SELECT * FROM table_name'
-    }
+    },
+    optimize_dtypes=True,
+    include_metadata=False
 )
 
 # MySQL
-aggregator.add_database_source(
+connector.add_database_source(
     name='mysql_db',
     connection_params={
         'db_type': 'mysql',
@@ -166,7 +182,7 @@ aggregator.add_database_source(
 )
 
 # SQLite
-aggregator.add_database_source(
+connector.add_database_source(
     name='sqlite_db',
     connection_params={
         'db_type': 'sqlite',
@@ -181,18 +197,19 @@ Supported formats: CSV, Excel (.xlsx, .xls), JSON, Parquet
 
 ```python
 # Single file
-aggregator.add_file_source(
+connector.add_file_source(
     name='csv_data',
-    file_paths='data.csv',
+    file_path='data.csv',
     read_options={
         'parse_dates': ['date_column'],
         'low_memory': False
     }
 )
 
-# Multiple files
-aggregator.add_file_source(
+# Multiple files (using file_paths parameter)
+connector.add_file_source(
     name='excel_data',
+    file_path=None,
     file_paths=['report1.xlsx', 'report2.xlsx'],
     read_options={
         'sheet_name': 'Data'
@@ -200,9 +217,9 @@ aggregator.add_file_source(
 )
 
 # JSON with different orientations
-aggregator.add_file_source(
+connector.add_file_source(
     name='json_data',
-    file_paths='data.json',
+    file_path='data.json',
     read_options={
         'orient': 'records'  # or 'split', 'index'
     }
@@ -215,11 +232,10 @@ REST API with various pagination types:
 
 ```python
 # Offset-based pagination
-aggregator.add_api_source(
+connector.add_api_source(
     name='api_data',
     base_url='https://api.example.com',
     headers={'Authorization': 'Bearer TOKEN'},
-    rate_limit_delay=0.5,  # seconds between requests
     endpoints={
         'users': {
             'endpoint': 'users',
@@ -233,7 +249,7 @@ aggregator.add_api_source(
 )
 
 # Page-based pagination
-endpoints={
+endpoints = {
     'products': {
         'endpoint': 'products',
         'paginate': True,
@@ -243,7 +259,7 @@ endpoints={
 }
 
 # Next URL pagination
-endpoints={
+endpoints = {
     'orders': {
         'endpoint': 'orders',
         'paginate': True,
@@ -259,32 +275,41 @@ The MLOptimizer provides automatic preprocessing for machine learning:
 ```python
 from instant_connector import MLOptimizer
 
-optimizer = MLOptimizer()
-
-# Optimization options
-df_optimized = optimizer.optimize_dataframe(
-    df,
-    target_column='target',  # Excluded from preprocessing
-    
-    # Missing value handling
-    handle_missing='auto',  # Options: 'auto', 'drop', 'mean', 'median', 'mode', 'forward_fill'
-    
-    # Categorical encoding
-    encode_categorical='auto',  # Options: 'auto', 'label', 'onehot', None
-    
-    # Feature scaling
-    scale_numeric='standard',  # Options: 'standard', 'minmax', 'robust', None
-    
-    # Feature selection
-    remove_low_variance=True,
-    remove_high_correlation=True,
-    correlation_threshold=0.95
+# Initialize with configuration
+optimizer = MLOptimizer(
+    random_state=42,
+    handle_missing='auto',  # 'auto', 'drop', 'mean', 'median', 'mode', 'knn'
+    encode_categorical='auto',  # 'auto', 'label', 'onehot', 'target', 'ordinal'
+    scale_numeric='auto',  # 'auto', 'standard', 'minmax', 'robust', None
+    feature_engineering=False,
+    reduce_memory=False
 )
 
-# Get optimization report
-report = optimizer.get_optimization_report()
-print(report['optimizations_applied'])
-print(report['feature_stats'])
+# Complete ML preprocessing pipeline
+result = optimizer.fit_transform(
+    df,
+    target_column='target',  # Optional target column
+    test_size=0.2,
+    stratify=False,
+    preserve_artifacts=True,
+    reduce_memory=False
+)
+
+# Access processed data
+if 'X_train' in result:
+    # Training/test splits created
+    X_train, X_test = result['X_train'], result['X_test']
+    y_train, y_test = result['y_train'], result['y_test']
+else:
+    # Single processed dataset
+    df_optimized = result['X_processed']
+
+# Get preprocessing information
+preprocessing_info = optimizer.get_preprocessing_info()
+print(f"Applied {len(preprocessing_info['preprocessing_history'])} optimization steps")
+
+# Transform new data using saved artifacts
+new_data_transformed = optimizer.transform(new_df, result.get('ml_artifacts'))
 ```
 
 ### Compression Options
@@ -303,8 +328,14 @@ pickle_manager = PickleManager(compression='gzip', compression_level=6)
 # BZ2 - Best compression ratio, slowest
 pickle_manager = PickleManager(compression='bz2', compression_level=9)
 
+# ZSTD - High performance compression
+pickle_manager = PickleManager(compression='zstd', compression_level=3)
+
 # No compression - Fastest save/load, largest files
 pickle_manager = PickleManager(compression='none')
+
+# Use with connector
+save_stats = connector.save_connector('output.pkl.lz4', pickle_manager=pickle_manager)
 ```
 
 ### Configuration Files
@@ -334,9 +365,7 @@ sources:
   
   csv_files:
     type: file
-    paths:
-      - data/2023/*.csv
-      - data/2024/*.csv
+    path: data/sales_2023.csv  # Single file
     read_options:
       parse_dates: ['date']
       dtype: {'product_id': str}
@@ -346,7 +375,6 @@ sources:
     base_url: https://api.example.com/v1
     headers:
       Authorization: Bearer ${API_TOKEN}
-    rate_limit_delay: 1.0
     endpoints:
       inventory:
         endpoint: inventory/items
@@ -355,18 +383,25 @@ sources:
         pagination_type: offset
         params:
           limit: 100
-          include_deleted: false
 
+# ML optimization settings (for constructor)
 optimization:
   handle_missing: auto
   encode_categorical: auto
   scale_numeric: standard
+  feature_engineering: false
+  reduce_memory: false
+
+# Output settings
+output:
+  compression: lz4
+  compression_level: 0
 ```
 
 Load configuration:
 ```python
-aggregator = DataAggregator(config_path='config/sources.yaml')
-aggregator.aggregate_and_save('output.pkl.lz4')
+connector = InstantDataConnector(config_path='config/sources.yaml')
+save_stats = connector.save_connector('output.pkl.lz4')
 ```
 
 ## Command Line Interface
@@ -374,40 +409,22 @@ aggregator.aggregate_and_save('output.pkl.lz4')
 ### aggregate_data.py
 
 ```bash
-# Basic usage
+# Basic usage with config
 python scripts/aggregate_data.py output.pkl.lz4 --config config/sources.yaml
 
 # With file sources
 python scripts/aggregate_data.py output.pkl.lz4 \
     --files data/*.csv \
-    --compression lz4 \
-    --encode-categorical auto \
-    --scale-numeric standard
+    --compression lz4
 
 # With database
 python scripts/aggregate_data.py output.pkl.lz4 \
-    --database "postgresql://user:pass@localhost/db" "SELECT * FROM table" \
-    --no-optimize
+    --database "postgresql://user:pass@localhost/db" "SELECT * FROM table"
 
 # With API
 python scripts/aggregate_data.py output.pkl.lz4 \
-    --api https://api.example.com /endpoint GET \
-    --compression gzip \
-    --compression-level 6
+    --api https://api.example.com /endpoint GET
 ```
-
-Options:
-- `--config`: Configuration file path
-- `--files`: File paths to aggregate
-- `--database`: Database connection and query
-- `--api`: API base URL, endpoint, and method
-- `--no-optimize`: Skip ML optimization
-- `--handle-missing`: Strategy for missing values
-- `--encode-categorical`: Categorical encoding strategy
-- `--scale-numeric`: Numeric scaling strategy
-- `--compression`: Compression method (lz4, gzip, bz2, none)
-- `--compression-level`: Compression level
-- `-v, --verbose`: Enable verbose logging
 
 ### load_data.py
 
@@ -420,12 +437,6 @@ python scripts/load_data.py data.pkl.lz4 --info
 
 # Show summary and first 5 rows
 python scripts/load_data.py data.pkl.lz4 --summary --head 5
-
-# Show statistics
-python scripts/load_data.py data.pkl.lz4 --describe
-
-# Load specific datasets
-python scripts/load_data.py data.pkl.lz4 --datasets dataset1 dataset2
 ```
 
 ## Examples
@@ -433,13 +444,23 @@ python scripts/load_data.py data.pkl.lz4 --datasets dataset1 dataset2
 ### Example 1: E-commerce Data Pipeline
 
 ```python
-# Aggregate sales data from multiple sources
-aggregator = DataAggregator()
+from instant_connector import InstantDataConnector, MLOptimizer
+
+# Create connector
+connector = InstantDataConnector(
+    max_memory_mb=4096,  # 4GB limit
+    max_rows=5_000_000,  # 5M rows limit
+    use_secure_serialization=True
+)
 
 # Add database with customer data
-aggregator.add_database_source(
+connector.add_database_source(
     'customer_db',
-    connection_params={...},
+    connection_params={
+        'db_type': 'postgresql',
+        'host': 'localhost',
+        'database': 'ecommerce'
+    },
     queries={
         'customers': 'SELECT * FROM customers',
         'orders': 'SELECT * FROM orders WHERE date >= CURRENT_DATE - INTERVAL 30 DAY'
@@ -447,155 +468,229 @@ aggregator.add_database_source(
 )
 
 # Add CSV files with product data
-aggregator.add_file_source(
+connector.add_file_source(
     'product_files',
-    ['products.csv', 'inventory.csv']
+    file_path=None,
+    file_paths=['products.csv', 'inventory.csv']
 )
 
-# Add API for real-time pricing
-aggregator.add_api_source(
-    'pricing_api',
-    base_url='https://api.pricing.com',
-    endpoints={
-        'prices': {
-            'endpoint': 'products/prices',
-            'paginate': True
-        }
-    }
+# Extract data
+raw_data = connector.extract_data()
+
+# Apply ML optimizations
+optimizer = MLOptimizer(
+    handle_missing='auto',
+    encode_categorical='onehot',
+    scale_numeric='minmax',
+    feature_engineering=True
 )
 
-# Save with optimizations
-aggregator.aggregate_and_save(
-    'ecommerce_ml_data.pkl.lz4',
-    optimize=True,
-    optimizer_kwargs={
-        'handle_missing': 'median',
-        'encode_categorical': 'onehot',
-        'scale_numeric': 'minmax'
-    }
-)
+for name, df in raw_data.items():
+    result = optimizer.fit_transform(df)
+    optimized_df = result.get('X_processed', df)
+    connector.raw_data[name] = optimized_df
+
+# Save
+save_stats = connector.save_connector('ecommerce_ml_data.pkl.lz4')
 ```
 
 ### Example 2: Time Series Data
 
 ```python
 # For time series, preserve temporal order
-aggregator = DataAggregator()
+connector = InstantDataConnector()
 
 # Add time series data
-aggregator.add_file_source(
+connector.add_file_source(
     'timeseries',
-    ['sensor_data_*.csv'],
+    file_path='sensor_data.csv',
     read_options={
         'parse_dates': ['timestamp'],
-        'index_col': 'timestamp',
-        'sort': True
+        'index_col': 'timestamp'
     }
 )
 
 # Custom optimization for time series
-from instant_connector import MLOptimizer
+optimizer = MLOptimizer(
+    handle_missing='forward_fill',  # Good for time series
+    scale_numeric=None,  # Preserve scale
+    encode_categorical='label'
+)
 
-optimizer = MLOptimizer()
-data = aggregator.extract_data()
-
-for name, df in data.items():
-    # Don't scale time series data
-    df_optimized = optimizer.optimize_dataframe(
-        df,
-        handle_missing='forward_fill',  # Good for time series
-        scale_numeric=None,  # Preserve scale
-        encode_categorical='label'
-    )
-    aggregator.datasets[name] = df_optimized
+raw_data = connector.extract_data()
+for name, df in raw_data.items():
+    result = optimizer.fit_transform(df)
+    connector.raw_data[name] = result.get('X_processed', df)
 
 # Save
-aggregator.save_connector('timeseries_data.pkl.lz4')
-```
-
-### Example 3: Large Dataset with Chunking
-
-```python
-# For very large datasets
-from instant_connector.sources import DatabaseSource
-
-with DatabaseSource(connection_params) as db_source:
-    # Process in chunks
-    chunk_iter = db_source.extract_data(
-        query='SELECT * FROM huge_table',
-        chunksize=10000  # Process 10k rows at a time
-    )
-    
-    all_chunks = []
-    for i, chunk in enumerate(chunk_iter):
-        # Process each chunk
-        processed = optimizer.optimize_dataframe(chunk)
-        all_chunks.append(processed)
-        
-        if i >= 100:  # Limit to 1M rows
-            break
-    
-    # Combine and save
-    final_df = pd.concat(all_chunks, ignore_index=True)
+connector.save_connector('timeseries_data.pkl.lz4')
 ```
 
 ## API Reference
 
-### DataAggregator
+### InstantDataConnector
 
 ```python
-class DataAggregator:
-    def __init__(self, config_path: Optional[str] = None)
+class InstantDataConnector:
+    def __init__(
+        self, 
+        config_path: Optional[Union[str, Path]] = None,
+        max_memory_mb: int = 2048,
+        max_rows: int = 10_000_000,
+        allowed_directories: Optional[List[Union[str, Path]]] = None,
+        use_secure_serialization: bool = True,
+        credential_manager: Optional[SecureCredentialManager] = None
+    )
     
-    def add_database_source(name: str, connection_params: dict, queries: dict)
-    def add_file_source(name: str, file_paths: Union[str, List[str]], read_options: dict)
-    def add_api_source(name: str, base_url: str, endpoints: dict, **kwargs)
+    def add_database_source(
+        self,
+        name: str,
+        connection_params: Dict[str, Any],
+        tables: Optional[List[str]] = None,
+        queries: Optional[Dict[str, str]] = None,
+        optimize_dtypes: bool = True,
+        include_metadata: bool = False
+    )
     
-    def extract_data(source_name: Optional[str] = None) -> Dict[str, pd.DataFrame]
-    def optimize_datasets(**kwargs) -> Dict[str, pd.DataFrame]
-    def save_connector(file_path: str, **kwargs) -> Dict[str, Any]
-    def aggregate_and_save(output_path: str, optimize: bool = True, **kwargs)
+    def add_file_source(
+        self,
+        name: str,
+        file_path: Union[str, Path],
+        file_paths: Optional[Union[str, Path, List[Union[str, Path]]]] = None,
+        read_options: Optional[Dict[str, Any]] = None,
+        optimize_dtypes: bool = True,
+        include_metadata: bool = False
+    )
+    
+    def add_api_source(
+        self,
+        name: str,
+        base_url: str,
+        endpoints: Union[List[str], Dict[str, Dict[str, Any]]],
+        headers: Optional[Dict[str, str]] = None,
+        **kwargs
+    )
+    
+    def extract_data(
+        self,
+        source_name: Optional[str] = None,
+        dataset_name: Optional[str] = None
+    ) -> Dict[str, pd.DataFrame]
+    
+    def optimize_datasets(
+        self,
+        optimizer: Optional[MLOptimizer] = None,
+        **optimizer_kwargs
+    ) -> Dict[str, pd.DataFrame]
+    
+    def save_connector(
+        self,
+        file_path: Union[str, Path],
+        pickle_manager: Optional[PickleManager] = None,
+        include_metadata: bool = True,
+        **save_kwargs
+    ) -> Dict[str, Any]
 ```
 
 ### MLOptimizer
 
 ```python
 class MLOptimizer:
-    def optimize_dataframe(
+    def __init__(
+        self, 
+        random_state: int = 42,
+        handle_missing: str = 'auto',
+        encode_categorical: str = 'auto', 
+        scale_numeric: str = 'auto',
+        feature_engineering: bool = False,
+        reduce_memory: bool = False
+    )
+    
+    def fit_transform(
+        self,
         df: pd.DataFrame,
         target_column: Optional[str] = None,
-        handle_missing: str = 'auto',
-        encode_categorical: str = 'auto',
-        scale_numeric: Optional[str] = None,
-        remove_low_variance: bool = True,
-        remove_high_correlation: bool = True
+        test_size: float = 0.2,
+        stratify: bool = False,
+        preserve_artifacts: bool = False,
+        reduce_memory: bool = False
+    ) -> Dict[str, Any]
+    
+    def transform(
+        self, 
+        df: pd.DataFrame, 
+        ml_artifacts: Optional[Dict] = None
     ) -> pd.DataFrame
     
-    def get_optimization_report() -> Dict[str, Any]
-    def transform_new_data(df: pd.DataFrame) -> pd.DataFrame
+    def optimize_dataframe(
+        self, 
+        df: pd.DataFrame, 
+        target_column: Optional[str] = None
+    ) -> pd.DataFrame
+    
+    def optimize_for_ml(
+        self, 
+        df: pd.DataFrame, 
+        target_column: str, 
+        test_size: float = 0.2, 
+        stratify: bool = False, 
+        **kwargs
+    ) -> Dict[str, pd.DataFrame]
+    
+    def get_preprocessing_info(self) -> Dict[str, Any]
+    
+    def get_feature_names(self) -> List[str]
 ```
 
 ### PickleManager
 
 ```python
 class PickleManager:
-    def __init__(self, compression: str = 'lz4', compression_level: int = 0)
+    def __init__(
+        self,
+        compression: str = 'lz4',
+        compression_level: int = 0,
+        chunk_threshold_mb: int = 500,
+        enable_progress: bool = True
+    )
+    
+    def serialize_datasets(
+        self,
+        data_payload: Dict[str, Any],
+        output_path: Union[str, Path],
+        add_metadata: bool = True,
+        optimize_memory: bool = True,
+        validate: bool = True,
+        parallel: bool = False
+    ) -> Dict[str, Any]
     
     def save_data_connector(
-        data: Dict[str, pd.DataFrame],
-        file_path: str,
-        metadata: Optional[dict] = None,
-        optimize_for_size: bool = False
+        self,
+        data: Union[Dict[str, pd.DataFrame], Dict[str, Any]],
+        file_path: Union[str, Path],
+        metadata: Optional[Dict[str, Any]] = None,
+        **kwargs
     ) -> Dict[str, Any]
     
     def load_data_connector(
-        file_path: str,
+        self,
+        file_path: Union[str, Path],
         dataset_names: Optional[List[str]] = None,
         return_metadata: bool = False
     ) -> Union[Dict[str, pd.DataFrame], Tuple[Dict, Dict]]
 
-# Convenience function
-def load_data_connector(file_path: str, **kwargs) -> Dict[str, pd.DataFrame]
+# Convenience functions
+def load_data_connector(
+    file_path: Union[str, Path], 
+    **kwargs
+) -> Dict[str, pd.DataFrame]
+
+def save_data_connector(
+    data: Union[Dict[str, pd.DataFrame], Dict[str, Any]],
+    file_path: Union[str, Path],
+    compression: str = 'lz4',
+    **kwargs
+) -> Dict[str, Any]
 ```
 
 ## Performance
@@ -615,6 +710,7 @@ def load_data_connector(file_path: str, **kwargs) -> Dict[str, pd.DataFrame]
 | LZ4         | 3.2x  | Fast      | Fast      |
 | GZIP        | 4.8x  | Medium    | Medium    |
 | BZ2         | 5.6x  | Slow      | Slow      |
+| ZSTD        | 4.1x  | Fast      | Fast      |
 | None        | 1.0x  | Fastest   | Fastest   |
 
 ### Memory Optimization
@@ -627,41 +723,21 @@ def load_data_connector(file_path: str, **kwargs) -> Dict[str, pd.DataFrame]
 
 ### Running Tests
 
-The project includes a comprehensive test suite covering unit tests, integration tests, and performance tests.
-
-#### Run all tests:
 ```bash
+# Run all tests
 pytest
 
 # Or use the test runner
 python run_tests.py
-```
 
-#### Run specific test modules:
-```bash
-# Test individual components
-pytest tests/test_database_source.py
-pytest tests/test_file_source.py
-pytest tests/test_api_source.py
+# Run specific test modules
+pytest tests/test_aggregator.py
 pytest tests/test_ml_optimizer.py
 pytest tests/test_pickle_manager.py
-pytest tests/test_aggregator.py
 
-# Run integration tests
-pytest tests/test_integration.py -m integration
-```
-
-#### Run with coverage:
-```bash
-# Install coverage dependencies
-pip install pytest-cov
-
-# Run with coverage report
+# Run with coverage
 pytest --cov=instant_connector --cov-report=html
-```
 
-#### Run specific test categories:
-```bash
 # Fast unit tests only
 pytest -m "not slow"
 
@@ -669,65 +745,47 @@ pytest -m "not slow"
 pytest -m integration
 ```
 
-### Test Structure
-
-- `tests/test_database_source.py` - Database connector tests
-- `tests/test_file_source.py` - File source tests (CSV, Excel, JSON, Parquet)
-- `tests/test_api_source.py` - API connector tests
-- `tests/test_ml_optimizer.py` - ML preprocessing tests
-- `tests/test_pickle_manager.py` - Serialization and compression tests
-- `tests/test_aggregator.py` - Main aggregator tests
-- `tests/test_integration.py` - End-to-end integration tests
-
-### Writing Tests
-
-When contributing, please ensure:
-1. All new features have corresponding tests
-2. Tests follow the existing naming convention
-3. Integration tests are marked with `@pytest.mark.integration`
-4. Slow tests are marked with `@pytest.mark.slow`
-
 ## Troubleshooting
 
 ### Common Issues
 
-**1. Database Connection Errors**
+**1. Import Errors**
 ```python
-# Check connection parameters
-try:
-    aggregator.add_database_source(...)
-except Exception as e:
-    print(f"Connection failed: {e}")
-    # Verify host, port, credentials
+# Wrong
+from instant_connector import DataAggregator
+
+# Correct
+from instant_connector import InstantDataConnector
 ```
 
-**2. Memory Errors with Large Files**
+**2. File Path Errors**
 ```python
-# Use chunking for large files
-aggregator.add_file_source(
-    'large_data',
-    'huge_file.csv',
-    read_options={'chunksize': 10000}
+# Wrong
+connector.add_file_source('data', file_paths=['file.csv'])
+
+# Correct
+connector.add_file_source('data', file_path='file.csv')
+# OR
+connector.add_file_source('data', file_path=None, file_paths=['file.csv'])
+```
+
+**3. Memory Errors with Large Files**
+```python
+# Use resource limits
+connector = InstantDataConnector(
+    max_memory_mb=8192,  # 8GB limit
+    max_rows=20_000_000  # 20M rows limit
 )
 ```
 
-**3. Slow API Responses**
+**4. ML Optimization Errors**
 ```python
-# Adjust timeout and retry settings
-aggregator.add_api_source(
-    'slow_api',
-    base_url='...',
-    timeout=60,  # seconds
-    max_retries=5,
-    rate_limit_delay=2.0
-)
-```
+# Wrong
+optimizer.optimize_dataframe(df, handle_missing='auto')
 
-**4. Pickle Compatibility**
-```python
-# Ensure same pandas version for save/load
-import pandas as pd
-print(pd.__version__)
+# Correct - configure in constructor
+optimizer = MLOptimizer(handle_missing='auto')
+result = optimizer.fit_transform(df)
 ```
 
 ### Debug Mode
@@ -736,10 +794,15 @@ Enable verbose logging:
 ```python
 import logging
 logging.basicConfig(level=logging.DEBUG)
-
-# Or use CLI
-python scripts/aggregate_data.py output.pkl.lz4 --verbose
 ```
+
+## Security Features
+
+- **Secure Credential Management**: Store database credentials securely using keyring
+- **Encrypted Serialization**: Optional encryption for sensitive data
+- **Resource Limits**: Built-in memory and processing limits
+- **Path Validation**: Restrict file operations to allowed directories
+- **Input Validation**: Comprehensive data validation and sanitization
 
 ## Contributing
 
