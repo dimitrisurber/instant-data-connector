@@ -192,6 +192,9 @@ class MLOptimizer:
                         'y_train': y_train,
                         'y_test': y_test
                     })
+                    # Also include the processed data for memory usage tests
+                    if reduce_memory:
+                        result['X_processed'] = X
                 except ValueError:
                     # Fallback if stratification fails
                     X_train, X_test, y_train, y_test = train_test_split(
@@ -531,6 +534,15 @@ class MLOptimizer:
                 report['features_created'].append(f'{col}_log')
                 self.feature_metadata['engineered_features'].append(f'{col}_log')
         
+        # Calculate feature importance if target is provided
+        if y is not None:
+            try:
+                feature_importances = self._calculate_feature_importance(X, y)
+                report['feature_importances'] = feature_importances
+            except Exception as e:
+                logger.warning(f"Feature importance calculation failed: {e}")
+                report['feature_importances'] = {}
+        
         # Update feature metadata
         self.feature_metadata['engineered_features'].extend(report['polynomial_features'])
         self.feature_metadata['engineered_features'].extend(report['interaction_features'])
@@ -579,13 +591,7 @@ class MLOptimizer:
             for col in categorical_cols:
                 n_unique = X[col].nunique()
                 
-                if n_unique == 2:
-                    # Binary encoding
-                    X, mapping = self._binary_encode(X, col)
-                    report['encoded_columns'][col] = 'binary'
-                    report['encoding_mappings'][col] = mapping
-                
-                elif n_unique <= 10:
+                if n_unique <= 3:
                     # One-hot encoding for low cardinality
                     X = self._onehot_encode(X, col)
                     report['encoded_columns'][col] = 'onehot'

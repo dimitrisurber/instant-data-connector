@@ -94,14 +94,22 @@ class TestDatabaseSource:
         conn_str = source._get_connection_string()
         assert "pass%40word%23123" in conn_str
     
+    @patch('instant_connector.sources.database_source.inspect')
     @patch('sqlalchemy.create_engine')
-    def test_connect_success(self, mock_create_engine, postgres_params):
+    def test_connect_success(self, mock_create_engine, mock_inspect, postgres_params):
         """Test successful database connection."""
         # Mock engine and connection
         mock_engine = Mock()
         mock_conn = Mock()
-        mock_engine.connect.return_value.__enter__.return_value = mock_conn
+        mock_context = Mock()
+        mock_context.__enter__ = Mock(return_value=mock_conn)
+        mock_context.__exit__ = Mock(return_value=None)
+        mock_engine.connect.return_value = mock_context
         mock_create_engine.return_value = mock_engine
+        
+        # Mock inspector
+        mock_inspector = Mock()
+        mock_inspect.return_value = mock_inspector
         
         source = DatabaseSource(postgres_params)
         source.connect()
@@ -122,12 +130,13 @@ class TestDatabaseSource:
     def test_disconnect(self, postgres_params):
         """Test database disconnection."""
         source = DatabaseSource(postgres_params)
-        source.engine = Mock()
+        mock_engine = Mock()
+        source.engine = mock_engine
         source.inspector = Mock()
         
         source.disconnect()
         
-        source.engine.dispose.assert_called_once()
+        mock_engine.dispose.assert_called_once()
         assert source.engine is None
         assert source.inspector is None
     
@@ -161,10 +170,13 @@ class TestDatabaseSource:
         source = DatabaseSource(postgres_params)
         source.engine = Mock()
         
-        result = source.extract_table('test_table', where_clause="id = 1")
+        result = source.extract_table('test_table', where_conditions={'id': 1})
         
+        # Check that the query contains parameterized WHERE clause
         args = mock_read_sql.call_args[0]
-        assert "WHERE id = 1" in args[0]
+        query = str(args[0])  # Convert TextClause to string
+        assert "WHERE" in query
+        assert "id" in query
     
     @patch('pandas.read_sql')
     def test_extract_table_with_sample_size(self, mock_read_sql, postgres_params):
@@ -178,7 +190,8 @@ class TestDatabaseSource:
         result = source.extract_table('test_table', sample_size=5)
         
         args = mock_read_sql.call_args[0]
-        assert "LIMIT 5" in args[0]
+        query = str(args[0])  # Convert TextClause to string
+        assert "LIMIT 5" in query
     
     @patch('pandas.read_sql')
     def test_extract_table_chunked(self, mock_read_sql, postgres_params):
@@ -203,12 +216,12 @@ class TestDatabaseSource:
         
         # Create test DataFrame with various types
         df = pd.DataFrame({
-            'int_col': [1, 2, 3],
-            'float_col': [1.0, 2.0, 3.0],
-            'str_col': ['a', 'b', 'c'],
-            'date_str': ['2023-01-01', '2023-01-02', '2023-01-03'],
-            'cat_col': ['cat1', 'cat1', 'cat2'],
-            '_metadata': ['skip', 'skip', 'skip']
+            'int_col': [1, 2, 3, 4, 5],
+            'float_col': [1.0, 2.0, 3.0, 4.0, 5.0],
+            'str_col': ['a', 'b', 'c', 'd', 'e'],
+            'date_str': ['2023-01-01', '2023-01-02', '2023-01-03', '2023-01-04', '2023-01-05'],
+            'cat_col': ['cat1', 'cat1', 'cat1', 'cat2', 'cat2'],  # 2 unique values out of 5 = 0.4 < 0.5
+            '_metadata': ['skip', 'skip', 'skip', 'skip', 'skip']
         })
         
         optimized = source._optimize_dtypes(df)

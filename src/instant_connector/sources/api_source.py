@@ -361,7 +361,7 @@ class APISource:
         # Process each nested column
         for col in nested_cols:
             # Handle dict columns
-            if df[col].apply(lambda x: isinstance(x, dict) if pd.notna(x) else False).any():
+            if df[col].apply(lambda x: isinstance(x, dict) if x is not None else False).any():
                 # Extract nested data
                 nested_data = pd.json_normalize(df[col].dropna())
                 if not nested_data.empty:
@@ -373,7 +373,7 @@ class APISource:
                     df = df.drop(columns=[col]).join(nested_data)
             
             # Handle list columns
-            elif df[col].apply(lambda x: isinstance(x, list) if pd.notna(x) else False).any():
+            elif df[col].apply(lambda x: isinstance(x, list) if x is not None else False).any():
                 # Different strategies for list columns
                 list_lengths = df[col].dropna().apply(len)
                 

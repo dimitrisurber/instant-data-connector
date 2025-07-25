@@ -64,7 +64,7 @@ class TestFileSource:
         """Test initialization with single file."""
         source = FileSource(temp_csv_file)
         assert len(source.file_paths) == 1
-        assert source.file_paths[0] == temp_csv_file
+        assert source.file_paths[0] == temp_csv_file.resolve()
     
     def test_init_multiple_files(self, temp_csv_file, temp_json_file):
         """Test initialization with multiple files."""
