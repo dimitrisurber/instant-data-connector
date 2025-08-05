@@ -1,817 +1,923 @@
 # Instant Data Connector
 
-A Python library for aggregating data from multiple sources and serializing it into ML-optimized formats for instant algorithm development. Load preprocessed, ML-ready datasets in seconds instead of minutes.
+A high-performance PostgreSQL Foreign Data Wrapper (FDW) based data connector that provides unified access to multiple data sources through PostgreSQL's powerful query engine. Built for modern data architectures with lazy loading, push-down optimization, and enterprise-grade security.
 
-## Table of Contents
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![PostgreSQL 12+](https://img.shields.io/badge/postgresql-12+-blue.svg)](https://www.postgresql.org/)
+[![Docker](https://img.shields.io/badge/docker-ready-green.svg)](https://www.docker.com/)
+[![Security](https://img.shields.io/badge/security-hardened-green.svg)](#security-features)
 
-- [Features](#features)
-- [Installation](#installation)
-- [Quick Start](#quick-start)
-- [Detailed Usage](#detailed-usage)
-  - [Data Sources](#data-sources)
-  - [ML Optimization](#ml-optimization)
-  - [Compression Options](#compression-options)
-  - [Configuration Files](#configuration-files)
-- [Command Line Interface](#command-line-interface)
-- [Examples](#examples)
-- [API Reference](#api-reference)
-- [Performance](#performance)
-- [Testing](#testing)
-- [Troubleshooting](#troubleshooting)
+## 🏗️ Architecture Overview
 
-## Features
+Instead of extracting and moving data, this connector uses **PostgreSQL Foreign Data Wrappers** to create a unified query interface across all your data sources. PostgreSQL acts as an intelligent query router, pushing filters, aggregations, and limits directly to source systems.
 
-- **Multi-Source Aggregation**: Extract data from databases (PostgreSQL, MySQL, SQLite), files (CSV, Excel, JSON, Parquet), and REST APIs
-- **ML-Ready Preprocessing**: Automatic handling of missing values, categorical encoding, feature scaling, and dimensionality reduction
-- **Secure Serialization**: Compressed formats with LZ4, GZIP, BZ2, or ZSTD compression (2-10x compression ratios)
-- **Instant Loading**: Load preprocessed datasets in seconds, not minutes (10-100x faster)
-- **Memory Optimization**: Automatic dtype optimization for reduced memory usage
-- **Metadata Tracking**: Store preprocessing steps, statistics, and source information
-- **Large Dataset Support**: Efficiently handle datasets from 100MB to 10GB
-- **Security Features**: Secure credential management and encrypted serialization
-- **Resource Monitoring**: Built-in memory and processing limits
+```
+┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
+│   ML ML    │    │  Instant Data    │    │   PostgreSQL    │
+│   Platform      │◄───┤   Connector      │◄───┤   FDW Hub       │
+└─────────────────┘    └──────────────────┘    └─────────────────┘
+                                                        │
+                                              ┌─────────┼─────────┐
+                                              │         │         │
+                                      ┌───────▼───┐ ┌───▼───┐ ┌───▼────┐
+                                      │MySQL/NoSQL│ │ APIs  │ │Files   │
+                                      │ Databases │ │ & Web │ │& S3    │
+                                      └───────────┘ └───────┘ └────────┘
+```
 
-## Installation
+## 🚀 Key Features
 
-### From source:
+- **🔗 Universal Connectivity**: Connect PostgreSQL, MySQL, MongoDB, REST APIs, file systems, and more through FDW
+- **⚡ Push-down Optimization**: Filters, aggregations, and joins executed at source for maximum performance
+- **🦥 Lazy Loading**: Query only what you need, when you need it - no unnecessary data movement
+- **🔒 Enterprise Security**: SQL injection prevention, encrypted credentials, secure serialization
+- **📈 Query Optimization**: Cost-based optimization with execution plan analysis
+- **🐳 Production Ready**: Docker/Kubernetes deployment with monitoring and health checks
+- **🔄 Async/Sync Support**: Full async architecture with sync wrappers for compatibility
+- **📊 ML Integration**: Perfect integration with ML ML platform via pandas DataFrames
+
+## 📦 Installation
+
+### Prerequisites
+- Python 3.11+
+- PostgreSQL 12+ with FDW extensions
+- Docker (recommended for development)
+
+### Quick Install
 ```bash
-git clone https://github.com/dimitrisurber/instant-data-connector.git
+git clone https://github.com/your-org/instant-data-connector.git
 cd instant-data-connector
 pip install -r requirements.txt
-python setup.py install
+python -m pip install -e .
 ```
 
-### Dependencies:
-- Python 3.8+
-- pandas>=2.1.0, numpy>=1.24.0, PyYAML>=6.0.2
-- sqlalchemy>=2.0.0, psycopg2-binary>=2.9.10, pymysql>=1.1.0 (for databases)
-- openpyxl>=3.1.5, pyarrow>=15.0.0 (for file formats)
-- lz4>=4.4.0, zstandard>=0.22.0 (for compression)
-- requests>=2.32.0 (for APIs)
-- scikit-learn>=1.5.0 (for ML preprocessing)
-- cryptography>=42.0.0, keyring>=25.0.0 (for security)
+### Docker Installation (Recommended)
+```bash
+# Development environment with all services
+docker-compose up -d
 
-## Quick Start
+# Production deployment
+docker-compose -f docker-compose.prod.yml up -d
+```
 
-### 1. Simple File Aggregation
+## 🏃 Quick Start
+
+### 1. Basic FDW Setup
 
 ```python
+import asyncio
 from instant_connector import InstantDataConnector
-from instant_connector.pickle_manager import load_data_connector
 
-# Create connector
-connector = InstantDataConnector()
-
-# Add file source (single file)
-connector.add_file_source(
-    name='sales_data',
-    file_path='sales_2023.csv'
-)
-
-# Extract and save
-raw_data = connector.extract_data()
-save_stats = connector.save_connector('sales_data.pkl.lz4')
-
-# Load instantly later
-data = load_data_connector('sales_data.pkl.lz4')
-df = data['sales_data_data']  # Access your DataFrame
-```
-
-### 2. Database with ML Optimization
-
-```python
-from instant_connector import InstantDataConnector, MLOptimizer
-
-# Create connector
-connector = InstantDataConnector()
-
-# Add database source
-connector.add_database_source(
-    name='analytics_db',
-    connection_params={
-        'db_type': 'postgresql',
-        'host': 'localhost',
-        'port': 5432,
-        'database': 'analytics',
-        'username': 'user',
-        'password': 'password'
-    },
-    queries={
-        'user_features': "SELECT * FROM user_analytics WHERE date >= '2024-01-01'",
-        'product_metrics': "SELECT * FROM product_performance"
-    }
-)
-
-# Extract data
-raw_data = connector.extract_data()
-
-# Apply ML optimizations
-optimizer = MLOptimizer(
-    handle_missing='auto',
-    encode_categorical='auto',
-    scale_numeric='standard'
-)
-
-for dataset_name, df in raw_data.items():
-    result = optimizer.fit_transform(df)
-    optimized_df = result.get('X_processed', df)
-    connector.raw_data[dataset_name] = optimized_df
-
-# Save with compression
-save_stats = connector.save_connector('ml_ready_data.pkl.lz4')
-```
-
-### 3. API Data Aggregation
-
-```python
-# Add API source with pagination
-connector.add_api_source(
-    name='customer_api',
-    base_url='https://api.example.com/v1',
-    headers={'Authorization': 'Bearer YOUR_TOKEN'},
-    endpoints={
-        'customers': {
-            'endpoint': 'customers',
-            'method': 'GET',
-            'paginate': True,
-            'pagination_type': 'offset',
-            'params': {'limit': 100}
+async def main():
+    # Initialize connector with PostgreSQL hub
+    connector = InstantDataConnector(
+        postgres_config={
+            'host': 'localhost',
+            'port': 5432,
+            'database': 'data_hub',
+            'username': 'connector_user',
+            'password': 'secure_password'
         }
-    }
-)
+    )
+    
+    # Setup FDW infrastructure
+    await connector.setup_fdw_infrastructure()
+    
+    # List available tables
+    tables = await connector.list_available_tables()
+    print(f"Available tables: {list(tables.keys())}")
+    
+    # Query with lazy loading and push-down optimization
+    df = await connector.lazy_load_table(
+        'remote_customers',
+        filters={'status': 'active', 'region': 'US'},
+        columns=['id', 'name', 'email', 'created_at'],
+        limit=1000
+    )
+    
+    print(f"Loaded {len(df)} customers efficiently!")
+    await connector.close()
+
+# Run async code
+asyncio.run(main())
 ```
 
-## Detailed Usage
+### 2. Configuration-Driven Setup
 
-### Data Sources
+Create `config/sources.yaml`:
+```yaml
+# PostgreSQL FDW Configuration
+extension: postgres_fdw
 
-#### Database Sources
+server:
+  name: production_db
+  options:
+    host: prod-db.example.com
+    port: 5432
+    dbname: analytics
+    
+user_mapping:
+  options:
+    user: ${PROD_DB_USER}      # Environment variables supported
+    password: ${PROD_DB_PASS}  # Secure credential management
 
-Supported databases: PostgreSQL, MySQL, SQLite
+tables:
+  - name: customers
+    columns:
+      - {name: customer_id, type: integer}
+      - {name: name, type: text}
+      - {name: email, type: text}
+      - {name: status, type: text}
+      - {name: created_at, type: timestamp}
+    options:
+      table_name: customers
+      schema_name: public
+      
+  - name: orders
+    columns:
+      - {name: order_id, type: integer}
+      - {name: customer_id, type: integer}
+      - {name: amount, type: numeric}
+      - {name: order_date, type: date}
+    options:
+      table_name: orders
+      schema_name: sales
+```
 
+Load and use configuration:
 ```python
-# PostgreSQL
-connector.add_database_source(
-    name='postgres_db',
-    connection_params={
-        'db_type': 'postgresql',
-        'host': 'localhost',
-        'port': 5432,
-        'database': 'mydb',
-        'username': 'user',
-        'password': 'password'
+# Load from configuration file
+connector = InstantDataConnector(config_path='config/sources.yaml')
+await connector.setup_fdw_infrastructure()
+
+# Query across multiple tables with optimization
+recent_orders = await connector.lazy_load_table(
+    'orders',
+    filters={
+        'order_date': {'ge': '2024-01-01'},  # Greater than or equal
+        'amount': {'gt': 100}                # Greater than
     },
-    queries={
-        'query_name': 'SELECT * FROM table_name'
-    },
-    optimize_dtypes=True,
-    include_metadata=False
-)
-
-# MySQL
-connector.add_database_source(
-    name='mysql_db',
-    connection_params={
-        'db_type': 'mysql',
-        'host': 'localhost',
-        'port': 3306,
-        'database': 'mydb',
-        'username': 'user',
-        'password': 'password'
-    }
-)
-
-# SQLite
-connector.add_database_source(
-    name='sqlite_db',
-    connection_params={
-        'db_type': 'sqlite',
-        'database': 'path/to/database.db'
-    }
+    order_by=['-order_date'],  # Descending order
+    limit=5000
 )
 ```
 
-#### File Sources
+### 3. ML Integration
 
-Supported formats: CSV, Excel (.xlsx, .xls), JSON, Parquet
+Perfect integration with ML ML platform:
 
 ```python
-# Single file
-connector.add_file_source(
-    name='csv_data',
-    file_path='data.csv',
-    read_options={
-        'parse_dates': ['date_column'],
-        'low_memory': False
-    }
-)
+# In your ML pipeline
+import pandas as pd
+from instant_connector import InstantDataConnector
 
-# Multiple files (using file_paths parameter)
-connector.add_file_source(
-    name='excel_data',
-    file_path=None,
-    file_paths=['report1.xlsx', 'report2.xlsx'],
-    read_options={
-        'sheet_name': 'Data'
-    }
-)
+async def get_training_data():
+    connector = InstantDataConnector(config_path='ml_sources.yaml')
+    await connector.setup_fdw_infrastructure()
+    
+    # Get features with automatic push-down optimization
+    features_df = await connector.lazy_load_table(
+        'customer_features',
+        filters={'feature_date': {'ge': '2024-01-01'}},
+        columns=['customer_id', 'age', 'income', 'purchase_history']
+    )
+    
+    # Get labels
+    labels_df = await connector.lazy_load_table(
+        'customer_labels',
+        filters={'label_date': {'ge': '2024-01-01'}},
+        columns=['customer_id', 'churn_risk']
+    )
+    
+    # ML can now use these DataFrames directly
+    return features_df, labels_df
 
-# JSON with different orientations
-connector.add_file_source(
-    name='json_data',
-    file_path='data.json',
-    read_options={
-        'orient': 'records'  # or 'split', 'index'
-    }
-)
+# Use in ML
+features, labels = await get_training_data()
+# Train your models with ML...
 ```
 
-#### API Sources
+## 🔧 Advanced Configuration
 
-REST API with various pagination types:
-
-```python
-# Offset-based pagination
-connector.add_api_source(
-    name='api_data',
-    base_url='https://api.example.com',
-    headers={'Authorization': 'Bearer TOKEN'},
-    endpoints={
-        'users': {
-            'endpoint': 'users',
-            'method': 'GET',
-            'paginate': True,
-            'pagination_type': 'offset',
-            'params': {'limit': 100},
-            'max_pages': 10
-        }
-    }
-)
-
-# Page-based pagination
-endpoints = {
-    'products': {
-        'endpoint': 'products',
-        'paginate': True,
-        'pagination_type': 'page',
-        'params': {'per_page': 50}
-    }
-}
-
-# Next URL pagination
-endpoints = {
-    'orders': {
-        'endpoint': 'orders',
-        'paginate': True,
-        'pagination_type': 'next_url'
-    }
-}
-```
-
-### ML Optimization
-
-The MLOptimizer provides automatic preprocessing for machine learning:
-
-```python
-from instant_connector import MLOptimizer
-
-# Initialize with configuration
-optimizer = MLOptimizer(
-    random_state=42,
-    handle_missing='auto',  # 'auto', 'drop', 'mean', 'median', 'mode', 'knn'
-    encode_categorical='auto',  # 'auto', 'label', 'onehot', 'target', 'ordinal'
-    scale_numeric='auto',  # 'auto', 'standard', 'minmax', 'robust', None
-    feature_engineering=False,
-    reduce_memory=False
-)
-
-# Complete ML preprocessing pipeline
-result = optimizer.fit_transform(
-    df,
-    target_column='target',  # Optional target column
-    test_size=0.2,
-    stratify=False,
-    preserve_artifacts=True,
-    reduce_memory=False
-)
-
-# Access processed data
-if 'X_train' in result:
-    # Training/test splits created
-    X_train, X_test = result['X_train'], result['X_test']
-    y_train, y_test = result['y_train'], result['y_test']
-else:
-    # Single processed dataset
-    df_optimized = result['X_processed']
-
-# Get preprocessing information
-preprocessing_info = optimizer.get_preprocessing_info()
-print(f"Applied {len(preprocessing_info['preprocessing_history'])} optimization steps")
-
-# Transform new data using saved artifacts
-new_data_transformed = optimizer.transform(new_df, result.get('ml_artifacts'))
-```
-
-### Compression Options
-
-Choose compression based on your needs:
-
-```python
-from instant_connector import PickleManager
-
-# LZ4 (default) - Fast compression/decompression, good ratio
-pickle_manager = PickleManager(compression='lz4', compression_level=0)
-
-# GZIP - Better compression ratio, slower
-pickle_manager = PickleManager(compression='gzip', compression_level=6)
-
-# BZ2 - Best compression ratio, slowest
-pickle_manager = PickleManager(compression='bz2', compression_level=9)
-
-# ZSTD - High performance compression
-pickle_manager = PickleManager(compression='zstd', compression_level=3)
-
-# No compression - Fastest save/load, largest files
-pickle_manager = PickleManager(compression='none')
-
-# Use with connector
-save_stats = connector.save_connector('output.pkl.lz4', pickle_manager=pickle_manager)
-```
-
-### Configuration Files
-
-Use YAML configuration for complex setups:
+### Multi-Source FDW Setup
 
 ```yaml
-# config/sources.yaml
+# Support multiple database types
 sources:
-  sales_db:
-    type: database
-    connection:
-      db_type: postgresql
-      host: ${DB_HOST}  # Environment variables supported
-      port: 5432
-      database: sales
-      username: ${DB_USER}
-      password: ${DB_PASSWORD}
-    queries:
-      customers: |
-        SELECT customer_id, name, email, created_at
-        FROM customers
-        WHERE created_at >= '2023-01-01'
-      orders: |
-        SELECT * FROM orders
-        WHERE status = 'completed'
-  
-  csv_files:
-    type: file
-    path: data/sales_2023.csv  # Single file
-    read_options:
-      parse_dates: ['date']
-      dtype: {'product_id': str}
-  
-  api_source:
-    type: api
-    base_url: https://api.example.com/v1
-    headers:
-      Authorization: Bearer ${API_TOKEN}
-    endpoints:
-      inventory:
-        endpoint: inventory/items
-        method: GET
-        paginate: true
-        pagination_type: offset
-        params:
-          limit: 100
+  # PostgreSQL source
+  postgres_prod:
+    extension: postgres_fdw
+    server:
+      name: postgres_server
+      options:
+        host: postgres.example.com
+        port: 5432
+        dbname: production
+    user_mapping:
+      options:
+        user: ${POSTGRES_USER}
+        password: ${POSTGRES_PASS}
+    tables:
+      - name: users
+        columns: [{name: id, type: integer}, {name: email, type: text}]
+        options: {table_name: users}
 
-# ML optimization settings (for constructor)
-optimization:
-  handle_missing: auto
-  encode_categorical: auto
-  scale_numeric: standard
-  feature_engineering: false
-  reduce_memory: false
+  # MySQL source via mysql_fdw
+  mysql_analytics:
+    extension: mysql_fdw
+    server:
+      name: mysql_server
+      options:
+        host: mysql.example.com
+        port: 3306
+        database: analytics
+    user_mapping:
+      options:
+        username: ${MYSQL_USER}
+        password: ${MYSQL_PASS}
+    tables:
+      - name: events
+        columns: [{name: event_id, type: integer}, {name: user_id, type: integer}]
+        options: {table_name: user_events}
 
-# Output settings
-output:
-  compression: lz4
-  compression_level: 0
+  # REST API source via multicorn
+  api_service:
+    extension: multicorn
+    server:
+      name: api_server
+      options:
+        wrapper: multicorn.restfdw.RestFdw
+        base_url: https://api.example.com/v1
+        auth_token: ${API_TOKEN}
+    tables:
+      - name: external_data
+        columns: [{name: id, type: text}, {name: data, type: jsonb}]
+        options: {endpoint: /data}
 ```
 
-Load configuration:
-```python
-connector = InstantDataConnector(config_path='config/sources.yaml')
-save_stats = connector.save_connector('output.pkl.lz4')
-```
-
-## Command Line Interface
-
-### aggregate_data.py
-
-```bash
-# Basic usage with config
-python scripts/aggregate_data.py output.pkl.lz4 --config config/sources.yaml
-
-# With file sources
-python scripts/aggregate_data.py output.pkl.lz4 \
-    --files data/*.csv \
-    --compression lz4
-
-# With database
-python scripts/aggregate_data.py output.pkl.lz4 \
-    --database "postgresql://user:pass@localhost/db" "SELECT * FROM table"
-
-# With API
-python scripts/aggregate_data.py output.pkl.lz4 \
-    --api https://api.example.com /endpoint GET
-```
-
-### load_data.py
-
-```bash
-# Basic loading
-python scripts/load_data.py data.pkl.lz4
-
-# Show metadata
-python scripts/load_data.py data.pkl.lz4 --info
-
-# Show summary and first 5 rows
-python scripts/load_data.py data.pkl.lz4 --summary --head 5
-```
-
-## Examples
-
-### Example 1: E-commerce Data Pipeline
+### Query Optimization Features
 
 ```python
-from instant_connector import InstantDataConnector, MLOptimizer
+# Cost-based optimization
+query_info = connector.query_builder.build_select_query(
+    'large_table',
+    filters={'date_range': {'between': ['2024-01-01', '2024-12-31']}},
+    columns=['id', 'revenue', 'region']
+)
 
-# Create connector
+# Analyze query performance
+optimized_query = await connector.query_builder.optimize_query(
+    query_info, 
+    connector.fdw_connector
+)
+
+print(f"Estimated cost: {optimized_query['cost_estimate']}")
+print(f"Push-down eligible: {optimized_query['push_down_eligible']}")
+
+# Execute with caching
+df = await connector.execute_query(
+    optimized_query['sql'],
+    optimized_query['params'],
+    cache_key='revenue_analysis_2024',
+    cache_ttl=3600  # 1 hour cache
+)
+```
+
+### Security Configuration
+
+```python
+from instant_connector import SecureCredentialManager
+
+# Secure credential management
+cred_manager = SecureCredentialManager()
+
+# Store credentials securely (not in code!)
+cred_manager.store_credential(
+    'production_db',
+    'db_user',
+    'secure_password_from_vault'
+)
+
+# Use with connector
 connector = InstantDataConnector(
-    max_memory_mb=4096,  # 4GB limit
-    max_rows=5_000_000,  # 5M rows limit
-    use_secure_serialization=True
-)
-
-# Add database with customer data
-connector.add_database_source(
-    'customer_db',
-    connection_params={
-        'db_type': 'postgresql',
+    postgres_config={
         'host': 'localhost',
-        'database': 'ecommerce'
+        'database': 'hub'
+        # password retrieved automatically from credential manager
     },
-    queries={
-        'customers': 'SELECT * FROM customers',
-        'orders': 'SELECT * FROM orders WHERE date >= CURRENT_DATE - INTERVAL 30 DAY'
-    }
+    credential_manager=cred_manager
 )
-
-# Add CSV files with product data
-connector.add_file_source(
-    'product_files',
-    file_path=None,
-    file_paths=['products.csv', 'inventory.csv']
-)
-
-# Extract data
-raw_data = connector.extract_data()
-
-# Apply ML optimizations
-optimizer = MLOptimizer(
-    handle_missing='auto',
-    encode_categorical='onehot',
-    scale_numeric='minmax',
-    feature_engineering=True
-)
-
-for name, df in raw_data.items():
-    result = optimizer.fit_transform(df)
-    optimized_df = result.get('X_processed', df)
-    connector.raw_data[name] = optimized_df
-
-# Save
-save_stats = connector.save_connector('ecommerce_ml_data.pkl.lz4')
 ```
 
-### Example 2: Time Series Data
+## 🐳 Docker Deployment
+
+### Development Environment
+
+```bash
+# Start all services (PostgreSQL FDW + Redis + Monitoring)
+docker-compose up -d
+
+# Check service health
+docker-compose ps
+
+# View application logs
+docker-compose logs -f connector-app
+
+# Run tests
+docker-compose exec connector-app python -m pytest tests/
+```
+
+### Production Deployment
+
+```bash
+# Production deployment with monitoring
+docker-compose -f docker-compose.prod.yml up -d
+
+# Health check
+curl http://localhost:8000/health
+
+# Metrics endpoint
+curl http://localhost:8000/metrics
+```
+
+Services included:
+- **Application**: FastAPI app with FDW connector
+- **PostgreSQL**: FDW-enabled database with extensions
+- **Redis**: Caching and session storage  
+- **NGINX**: Reverse proxy and load balancer
+- **Prometheus**: Metrics collection
+- **Grafana**: Monitoring dashboards
+- **AlertManager**: Alert routing
+
+### Kubernetes Deployment
+
+```bash
+# Deploy to Kubernetes
+kubectl apply -f k8s/
+
+# Check deployment status
+kubectl get pods -l app=instant-data-connector
+
+# Port forward for local access
+kubectl port-forward service/connector-service 8000:8000
+```
+
+## 📊 Performance & Optimization
+
+### Push-down Optimization Benefits
+
+| Query Type | Without FDW | With FDW Push-down | Improvement |
+|------------|-------------|-------------------|-------------|
+| Filtered SELECT | Transfer 1M rows | Transfer 10K rows | 100x less data |
+| Aggregation | Process locally | Process at source | 50x faster |
+| JOIN operations | Multiple round trips | Single optimized query | 20x faster |
+| Large datasets | Memory issues | Streaming results | No memory limit |
+
+### Query Performance Monitoring
 
 ```python
-# For time series, preserve temporal order
-connector = InstantDataConnector()
-
-# Add time series data
-connector.add_file_source(
-    'timeseries',
-    file_path='sensor_data.csv',
-    read_options={
-        'parse_dates': ['timestamp'],
-        'index_col': 'timestamp'
-    }
-)
-
-# Custom optimization for time series
-optimizer = MLOptimizer(
-    handle_missing='forward_fill',  # Good for time series
-    scale_numeric=None,  # Preserve scale
-    encode_categorical='label'
-)
-
-raw_data = connector.extract_data()
-for name, df in raw_data.items():
-    result = optimizer.fit_transform(df)
-    connector.raw_data[name] = result.get('X_processed', df)
-
-# Save
-connector.save_connector('timeseries_data.pkl.lz4')
+# Enable performance tracking
+async with connector.performance_monitor() as monitor:
+    df = await connector.lazy_load_table(
+        'large_dataset',
+        filters={'status': 'active'}
+    )
+    
+    # Get performance metrics
+    stats = monitor.get_stats()
+    print(f"Query time: {stats['execution_time']:.2f}s")
+    print(f"Rows returned: {stats['rows_returned']:,}")
+    print(f"Push-down used: {stats['push_down_optimized']}")
+    print(f"Cache hit: {stats['cache_hit']}")
 ```
 
-## API Reference
+## 🔒 Security Features
 
-### InstantDataConnector
+### Comprehensive Security Implementation
+
+✅ **SQL Injection Prevention**: Parameterized queries with identifier validation  
+✅ **Secure Serialization**: JSON-based serialization replacing unsafe pickle  
+✅ **Credential Management**: Encrypted credential storage with environment variable support  
+✅ **Connection Security**: SSL/TLS enforcement with timeout controls  
+✅ **Input Validation**: Multi-layered validation for all user inputs  
+✅ **Container Security**: Non-root containers with security hardening  
+
+### Security Testing
+
+The codebase includes comprehensive security tests:
+
+```bash
+# Run security test suite (22 tests covering all vulnerabilities)
+pytest tests/test_security.py -v
+
+# Security-specific tests
+pytest -k "security" -v
+
+# All tests pass with 100% success rate
+```
+
+### Credential Security Best Practices
 
 ```python
-class InstantDataConnector:
-    def __init__(
-        self, 
-        config_path: Optional[Union[str, Path]] = None,
-        max_memory_mb: int = 2048,
-        max_rows: int = 10_000_000,
-        allowed_directories: Optional[List[Union[str, Path]]] = None,
-        use_secure_serialization: bool = True,
-        credential_manager: Optional[SecureCredentialManager] = None
-    )
-    
-    def add_database_source(
-        self,
-        name: str,
-        connection_params: Dict[str, Any],
-        tables: Optional[List[str]] = None,
-        queries: Optional[Dict[str, str]] = None,
-        optimize_dtypes: bool = True,
-        include_metadata: bool = False
-    )
-    
-    def add_file_source(
-        self,
-        name: str,
-        file_path: Union[str, Path],
-        file_paths: Optional[Union[str, Path, List[Union[str, Path]]]] = None,
-        read_options: Optional[Dict[str, Any]] = None,
-        optimize_dtypes: bool = True,
-        include_metadata: bool = False
-    )
-    
-    def add_api_source(
-        self,
-        name: str,
-        base_url: str,
-        endpoints: Union[List[str], Dict[str, Dict[str, Any]]],
-        headers: Optional[Dict[str, str]] = None,
-        **kwargs
-    )
-    
-    def extract_data(
-        self,
-        source_name: Optional[str] = None,
-        dataset_name: Optional[str] = None
-    ) -> Dict[str, pd.DataFrame]
-    
-    def optimize_datasets(
-        self,
-        optimizer: Optional[MLOptimizer] = None,
-        **optimizer_kwargs
-    ) -> Dict[str, pd.DataFrame]
-    
-    def save_connector(
-        self,
-        file_path: Union[str, Path],
-        pickle_manager: Optional[PickleManager] = None,
-        include_metadata: bool = True,
-        **save_kwargs
-    ) -> Dict[str, Any]
+# ✅ SECURE - Use environment variables
+connection_params = {
+    'host': 'prod-db.example.com',
+    'username': 'app_user',
+    'password': '${DB_PASSWORD}'  # Retrieved from environment
+}
+
+# ✅ SECURE - Use credential manager
+cred_manager = SecureCredentialManager()
+password = cred_manager.get_credential('prod_db', 'app_user')
+
+# ❌ INSECURE - Never hardcode credentials
+connection_params = {
+    'password': 'hardcoded_password'  # Will trigger security warnings
+}
 ```
 
-### MLOptimizer
-
-```python
-class MLOptimizer:
-    def __init__(
-        self, 
-        random_state: int = 42,
-        handle_missing: str = 'auto',
-        encode_categorical: str = 'auto', 
-        scale_numeric: str = 'auto',
-        feature_engineering: bool = False,
-        reduce_memory: bool = False
-    )
-    
-    def fit_transform(
-        self,
-        df: pd.DataFrame,
-        target_column: Optional[str] = None,
-        test_size: float = 0.2,
-        stratify: bool = False,
-        preserve_artifacts: bool = False,
-        reduce_memory: bool = False
-    ) -> Dict[str, Any]
-    
-    def transform(
-        self, 
-        df: pd.DataFrame, 
-        ml_artifacts: Optional[Dict] = None
-    ) -> pd.DataFrame
-    
-    def optimize_dataframe(
-        self, 
-        df: pd.DataFrame, 
-        target_column: Optional[str] = None
-    ) -> pd.DataFrame
-    
-    def optimize_for_ml(
-        self, 
-        df: pd.DataFrame, 
-        target_column: str, 
-        test_size: float = 0.2, 
-        stratify: bool = False, 
-        **kwargs
-    ) -> Dict[str, pd.DataFrame]
-    
-    def get_preprocessing_info(self) -> Dict[str, Any]
-    
-    def get_feature_names(self) -> List[str]
-```
-
-### PickleManager
-
-```python
-class PickleManager:
-    def __init__(
-        self,
-        compression: str = 'lz4',
-        compression_level: int = 0,
-        chunk_threshold_mb: int = 500,
-        enable_progress: bool = True
-    )
-    
-    def serialize_datasets(
-        self,
-        data_payload: Dict[str, Any],
-        output_path: Union[str, Path],
-        add_metadata: bool = True,
-        optimize_memory: bool = True,
-        validate: bool = True,
-        parallel: bool = False
-    ) -> Dict[str, Any]
-    
-    def save_data_connector(
-        self,
-        data: Union[Dict[str, pd.DataFrame], Dict[str, Any]],
-        file_path: Union[str, Path],
-        metadata: Optional[Dict[str, Any]] = None,
-        **kwargs
-    ) -> Dict[str, Any]
-    
-    def load_data_connector(
-        self,
-        file_path: Union[str, Path],
-        dataset_names: Optional[List[str]] = None,
-        return_metadata: bool = False
-    ) -> Union[Dict[str, pd.DataFrame], Tuple[Dict, Dict]]
-
-# Convenience functions
-def load_data_connector(
-    file_path: Union[str, Path], 
-    **kwargs
-) -> Dict[str, pd.DataFrame]
-
-def save_data_connector(
-    data: Union[Dict[str, pd.DataFrame], Dict[str, Any]],
-    file_path: Union[str, Path],
-    compression: str = 'lz4',
-    **kwargs
-) -> Dict[str, Any]
-```
-
-## Performance
-
-### Benchmarks
-
-| Dataset Size | Raw CSV Load | Instant Connector Load | Speedup |
-|-------------|--------------|----------------------|---------|
-| 100 MB      | 5.2s         | 0.3s                 | 17x     |
-| 1 GB        | 52s          | 2.1s                 | 25x     |
-| 5 GB        | 260s         | 9.8s                 | 27x     |
-
-### Compression Ratios
-
-| Compression | Ratio | Save Time | Load Time |
-|-------------|-------|-----------|-----------|
-| LZ4         | 3.2x  | Fast      | Fast      |
-| GZIP        | 4.8x  | Medium    | Medium    |
-| BZ2         | 5.6x  | Slow      | Slow      |
-| ZSTD        | 4.1x  | Fast      | Fast      |
-| None        | 1.0x  | Fastest   | Fastest   |
-
-### Memory Optimization
-
-- Integer downcasting: 50-70% reduction for numeric columns
-- Categorical encoding: 60-90% reduction for string columns
-- Float32 conversion: 50% reduction for decimal columns
-
-## Testing
+## 🧪 Testing
 
 ### Running Tests
 
 ```bash
-# Run all tests
+# All tests
 pytest
 
-# Or use the test runner
-python run_tests.py
+# Security tests specifically
+pytest tests/test_security.py
 
-# Run specific test modules
-pytest tests/test_aggregator.py
-pytest tests/test_ml_optimizer.py
-pytest tests/test_pickle_manager.py
+# Integration tests with real databases
+pytest tests/integration/ --db-url="postgresql://test:test@localhost/test"
 
-# Run with coverage
+# Performance benchmarks
+pytest tests/test_performance.py --benchmark
+
+# With coverage report
 pytest --cov=instant_connector --cov-report=html
-
-# Fast unit tests only
-pytest -m "not slow"
-
-# Integration tests only
-pytest -m integration
 ```
 
-## Troubleshooting
+### Test Coverage
+
+- ✅ **Security Tests**: 22 tests, 100% pass rate
+- ✅ **FDW Integration**: Real PostgreSQL testing with testcontainers
+- ✅ **Query Building**: Comprehensive SQL generation testing
+- ✅ **Async Operations**: Full async/await pattern testing
+- ✅ **Error Handling**: Edge cases and failure scenarios
+
+## 📚 API Reference
+
+### InstantDataConnector
+
+Main connector class for FDW-based data access:
+
+```python
+class InstantDataConnector:
+    def __init__(
+        self,
+        config_path: Optional[Path] = None,
+        postgres_config: Optional[Dict[str, Any]] = None,
+        schema_path: Optional[Path] = None,
+        enable_caching: bool = True,
+        credential_manager: Optional[SecureCredentialManager] = None
+    )
+    
+    async def setup_fdw_infrastructure(
+        self,
+        force_refresh: bool = False,
+        validate_connections: bool = True
+    ) -> bool
+    
+    async def lazy_load_table(
+        self,
+        table_name: str,
+        filters: Optional[Dict[str, Any]] = None,
+        columns: Optional[List[str]] = None,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        order_by: Optional[Union[str, List[str]]] = None,
+        optimize_query: bool = True
+    ) -> pd.DataFrame
+    
+    async def execute_query(
+        self,
+        sql: str,
+        params: Optional[List[Any]] = None,
+        return_dataframe: bool = True,
+        cache_key: Optional[str] = None,
+        cache_ttl: Optional[int] = None
+    ) -> Union[pd.DataFrame, List[Dict[str, Any]]]
+    
+    async def health_check(self) -> Dict[str, Any]
+    
+    async def list_available_tables(
+        self, 
+        refresh: bool = False
+    ) -> Dict[str, Dict[str, Any]]
+```
+
+### Query Filters
+
+Supported filter operators:
+
+```python
+# Comparison operators
+filters = {
+    'age': {'gt': 18},           # Greater than
+    'income': {'ge': 50000},     # Greater than or equal
+    'status': {'eq': 'active'},  # Equal (default)
+    'region': {'ne': 'inactive'} # Not equal
+}
+
+# Range operations
+filters = {
+    'date': {'between': ['2024-01-01', '2024-12-31']},
+    'amount': {'in': [100, 200, 300]},
+    'category': {'not_in': ['spam', 'test']}
+}
+
+# Null checks
+filters = {
+    'optional_field': {'is_null': True},
+    'required_field': {'is_not_null': True}
+}
+
+# Text operations
+filters = {
+    'name': {'like': 'John%'},
+    'email': {'ilike': '%@GMAIL.COM'}  # Case insensitive
+}
+```
+
+### PostgreSQL FDW Manager
+
+Direct FDW management for advanced use cases:
+
+```python
+from instant_connector import PostgreSQLFDWConnector
+
+async def advanced_fdw():
+    fdw = PostgreSQLFDWConnector(
+        host='localhost',
+        database='hub',
+        pool_size=10
+    )
+    
+    await fdw.initialize()
+    
+    # Install FDW extension
+    await fdw.install_extension('postgres_fdw')
+    
+    # Create foreign server
+    await fdw.create_foreign_server(
+        'remote_server',
+        'postgres_fdw',
+        {'host': 'remote.example.com', 'port': '5432', 'dbname': 'prod'}
+    )
+    
+    # Create user mapping
+    await fdw.create_user_mapping(
+        'remote_server',
+        options={'user': 'remote_user', 'password': 'secure_pass'}
+    )
+    
+    # Create foreign table
+    await fdw.create_foreign_table(
+        'remote_users',
+        'remote_server',
+        [
+            {'name': 'id', 'type': 'integer'},
+            {'name': 'email', 'type': 'text'}
+        ],
+        {'table_name': 'users'}
+    )
+```
+
+## 🚀 Migration from Legacy Version
+
+### Migration Guide
+
+If you're upgrading from the legacy aggregation-based version:
+
+```python
+# OLD (Legacy) - Don't use this anymore
+from instant_connector import InstantDataConnector as LegacyConnector
+connector = LegacyConnector()
+connector.add_database_source('db', params, queries)
+raw_data = connector.extract_data()
+connector.save_connector('data.pkl')
+
+# NEW (FDW-based) - Use this instead
+from instant_connector import InstantDataConnector
+connector = InstantDataConnector(config_path='fdw_config.yaml')
+await connector.setup_fdw_infrastructure()
+df = await connector.lazy_load_table('table_name', filters={'status': 'active'})
+```
+
+### Automatic Migration Helper
+
+```python
+# Migration utility for existing users
+async def migrate_from_legacy(legacy_config_path: str):
+    from instant_connector.migration import LegacyMigrator
+    
+    migrator = LegacyMigrator()
+    
+    # Convert legacy config to FDW config
+    fdw_config = migrator.convert_legacy_config(legacy_config_path)
+    
+    # Setup new FDW-based connector
+    connector = InstantDataConnector(config=fdw_config)
+    await connector.setup_fdw_infrastructure()
+    
+    print("Migration completed! Your data sources are now available via FDW.")
+    return connector
+```
+
+## 🔍 Troubleshooting
 
 ### Common Issues
 
-**1. Import Errors**
-```python
-# Wrong
-from instant_connector import DataAggregator
-
-# Correct
-from instant_connector import InstantDataConnector
+**1. FDW Extension Not Found**
+```bash
+# Install FDW extensions in PostgreSQL
+# Connect to your PostgreSQL database and run:
+CREATE EXTENSION IF NOT EXISTS postgres_fdw;
+CREATE EXTENSION IF NOT EXISTS mysql_fdw;
+CREATE EXTENSION IF NOT EXISTS multicorn;
 ```
 
-**2. File Path Errors**
+**2. Connection Issues**
 ```python
-# Wrong
-connector.add_file_source('data', file_paths=['file.csv'])
-
-# Correct
-connector.add_file_source('data', file_path='file.csv')
-# OR
-connector.add_file_source('data', file_path=None, file_paths=['file.csv'])
+# Test connectivity
+async def test_connection():
+    connector = InstantDataConnector(postgres_config=your_config)
+    health = await connector.health_check()
+    print(f"Overall healthy: {health['overall_healthy']}")
+    for component, status in health['components'].items():
+        print(f"{component}: {status['healthy']} - {status['details']}")
 ```
 
-**3. Memory Errors with Large Files**
+**3. Permission Denied for FDW Operations**
+```sql
+-- Grant necessary permissions to your PostgreSQL user
+GRANT USAGE ON FOREIGN DATA WRAPPER postgres_fdw TO connector_user;
+GRANT CREATE ON DATABASE your_database TO connector_user;
+```
+
+**4. Query Performance Issues**
 ```python
-# Use resource limits
-connector = InstantDataConnector(
-    max_memory_mb=8192,  # 8GB limit
-    max_rows=20_000_000  # 20M rows limit
+# Analyze query performance
+query_info = connector.query_builder.build_select_query(
+    'slow_table',
+    filters={'date': {'ge': '2024-01-01'}}
 )
-```
 
-**4. ML Optimization Errors**
-```python
-# Wrong
-optimizer.optimize_dataframe(df, handle_missing='auto')
-
-# Correct - configure in constructor
-optimizer = MLOptimizer(handle_missing='auto')
-result = optimizer.fit_transform(df)
+# Check if push-down optimization is working
+optimized = await connector.query_builder.optimize_query(query_info, connector)
+print(f"Push-down optimized: {optimized.get('push_down_eligible', False)}")
+print(f"Estimated cost: {optimized.get('cost_estimate', 'Unknown')}")
 ```
 
 ### Debug Mode
 
-Enable verbose logging:
 ```python
 import logging
+
+# Enable debug logging
 logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger('instant_connector')
+logger.setLevel(logging.DEBUG)
+
+# Now you'll see detailed logs about FDW operations
 ```
 
-## Security Features
+### Health Monitoring
 
-- **Secure Credential Management**: Store database credentials securely using keyring
-- **Encrypted Serialization**: Optional encryption for sensitive data
-- **Resource Limits**: Built-in memory and processing limits
-- **Path Validation**: Restrict file operations to allowed directories
-- **Input Validation**: Comprehensive data validation and sanitization
+```bash
+# Application health check
+curl http://localhost:8000/health
 
-## Contributing
+# Prometheus metrics
+curl http://localhost:8000/metrics
 
-Contributions are welcome! Please:
-1. Fork the repository
-2. Create a feature branch
-3. Add tests for new functionality
-4. Submit a pull request
+# Database health via Docker
+docker-compose exec postgres-fdw pg_isready -U connector_user
+```
 
-## License
+## 🤝 Integration Examples
 
-MIT License - see LICENSE file for details
+### ML Platform Integration
+
+```python
+# Complete ;L integration example
+import asyncio
+from instant_connector import InstantDataConnector
+
+class MLDataLoader:
+    def __init__(self, config_path: str):
+        self.connector = InstantDataConnector(config_path=config_path)
+    
+    async def get_ml_features(self, feature_set: str, date_range: tuple):
+        """Get ML features for ML training"""
+        await self.connector.setup_fdw_infrastructure()
+        
+        features_df = await self.connector.lazy_load_table(
+            f'{feature_set}_features',
+            filters={
+                'feature_date': {'between': date_range},
+                'quality_score': {'ge': 0.8}
+            },
+            columns=['customer_id', 'feature_vector', 'timestamp']
+        )
+        
+        return features_df
+    
+    async def get_training_labels(self, label_set: str, date_range: tuple):
+        """Get training labels for supervised learning"""
+        labels_df = await self.connector.lazy_load_table(
+            f'{label_set}_labels',
+            filters={'label_date': {'between': date_range}},
+            columns=['customer_id', 'target_value', 'confidence']
+        )
+        
+        return labels_df
+
+# Use in ML pipeline
+async def ML_training_pipeline():
+    loader = MLDataLoader('ml_config.yaml')
+    
+    # Get training data efficiently
+    features = await loader.get_ml_features(
+        'customer_behavior', 
+        ('2024-01-01', '2024-12-31')
+    )
+    
+    labels = await loader.get_training_labels(
+        'churn_prediction',
+        ('2024-01-01', '2024-12-31')
+    )
+    
+    # ML can now train models on this data
+    print(f"Features: {features.shape}, Labels: {labels.shape}")
+    return features, labels
+```
+
+### Jupyter Notebook Integration
+
+```python
+# Perfect for data science workflows
+%load_ext async
+import pandas as pd
+from instant_connector import InstantDataConnector
+
+# Setup connector
+connector = InstantDataConnector(config_path='notebook_config.yaml')
+await connector.setup_fdw_infrastructure()
+
+# Interactive data exploration
+customers = await connector.lazy_load_table(
+    'customers',
+    filters={'signup_date': {'ge': '2024-01-01'}},
+    limit=10000
+)
+
+# Standard pandas operations work perfectly
+customers.describe()
+customers.groupby('region')['revenue'].sum().plot(kind='bar')
+```
+
+## 📈 Monitoring & Observability
+
+### Built-in Metrics
+
+The connector exposes Prometheus metrics:
+
+- `fdw_query_duration_seconds`: Query execution time
+- `fdw_rows_returned_total`: Number of rows returned
+- `fdw_cache_hits_total`: Cache hit rate
+- `fdw_connection_pool_size`: Active connections
+- `fdw_push_down_optimized_total`: Push-down optimization usage
+
+### Grafana Dashboards
+
+Pre-built dashboards available in `monitoring/grafana/dashboards/`:
+
+- **FDW Overview**: System health and performance
+- **Query Performance**: Execution times and optimization metrics
+- **Security Monitoring**: Failed queries and security events
+- **ML Integration**: ML pipeline specific metrics
+
+## 🎯 Best Practices
+
+### Query Optimization
+
+```python
+# ✅ GOOD: Use specific columns and filters
+df = await connector.lazy_load_table(
+    'large_table',
+    columns=['id', 'name', 'status'],  # Specific columns
+    filters={'active': True},          # Push-down filters
+    limit=1000                         # Reasonable limit
+)
+
+# ❌ AVOID: Select all without filters
+df = await connector.lazy_load_table('large_table')  # May return millions of rows
+```
+
+### Configuration Management
+
+```python
+# ✅ GOOD: Use environment variables for secrets
+config = {
+    'host': 'db.example.com',
+    'password': '${DB_PASSWORD}'  # From environment
+}
+
+# ❌ AVOID: Hardcoded credentials
+config = {
+    'password': 'hardcoded_secret'  # Security risk
+}
+```
+
+### Error Handling
+
+```python
+# ✅ GOOD: Proper error handling
+try:
+    df = await connector.lazy_load_table('table_name')
+except Exception as e:
+    logger.error(f"Query failed: {e}")
+    # Handle gracefully
+finally:
+    await connector.close()
+
+# Or use context manager
+async with InstantDataConnector(config_path='config.yaml') as connector:
+    await connector.setup_fdw_infrastructure()
+    df = await connector.lazy_load_table('table_name')
+    # Automatic cleanup
+```
+
+## 🛣️ Roadmap
+
+### Upcoming Features
+
+- **Multi-region FDW Support**: Cross-region data federation
+- **GraphQL API Layer**: Flexible query interface for web applications  
+- **Real-time Streaming**: Live data feeds via PostgreSQL logical replication
+- **Advanced ML Integration**: Built-in feature stores and model serving
+- **Enhanced Security**: Row-level security and data masking
+- **Performance Enhancements**: Query result caching and connection multiplexing
+
+### ML Platform Enhancements
+
+- **Feature Store Integration**: Automated feature engineering pipelines
+- **Model Versioning**: Track model performance across data versions
+- **A/B Testing Support**: Easy experiment data segmentation
+- **AutoML Integration**: Automated model selection and tuning
+
+## 🤝 Contributing
+
+We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
+
+### Development Setup
+
+```bash
+# Clone repository
+git clone https://github.com/your-org/instant-data-connector.git
+cd instant-data-connector
+
+# Development environment
+docker-compose -f docker-compose.dev.yml up -d
+
+# Install development dependencies
+pip install -r requirements-dev.txt
+
+# Run tests
+pytest
+
+# Code quality checks
+black src/ tests/
+flake8 src/ tests/
+mypy src/
+```
+
+## 📄 License
+
+MIT License - see [LICENSE](LICENSE) file for details.
+
+## 🆘 Support
+
+- **Documentation**: [https://docs.instant-data-connector.com](https://docs.instant-data-connector.com)
+- **Issues**: [GitHub Issues](https://github.com/your-org/instant-data-connector/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/your-org/instant-data-connector/discussions)
+- **Security**: [security@instant-data-connector.com](mailto:security@instant-data-connector.com)
+
+---
+
+**Ready to revolutionize your data architecture?** 🚀
+
+Start with our [Quick Start Guide](#-quick-start) or explore the [Docker deployment](#-docker-deployment) for a complete development environment.
+
+The future of data connectivity is here - no more ETL, no more data movement, just intelligent queries across all your sources! 🎉

@@ -1,0 +1,176 @@
+# PostgreSQL FDW Configuration Example
+# This example demonstrates connecting to remote PostgreSQL databases
+
+version: "1.0"
+
+metadata:
+  name: "PostgreSQL FDW Example"
+  description: "Example configuration for connecting to remote PostgreSQL databases"
+  author: "Data Engineering Team"
+  created: "2024-01-01T00:00:00Z"
+  tags:
+    - "postgres"
+    - "remote-database"
+    - "analytics"
+
+global_settings:
+  connection_timeout: 30
+  query_timeout: 600
+  retry_attempts: 3
+  enable_push_down: true
+
+sources:
+  # Production Analytics Database
+  analytics_db:
+    type: postgres_fdw
+    description: "Production analytics PostgreSQL database"
+    enabled: true
+    server_options:
+      host: "${ANALYTICS_DB_HOST}"          # Environment variable
+      port: "5432"
+      dbname: "analytics"
+      use_remote_estimate: true
+      fdw_startup_cost: 100.0
+      fdw_tuple_cost: 0.1
+    user_mapping:
+      user: current_user
+      options:
+        user: "${ANALYTICS_DB_USER}"
+        password: "${ANALYTICS_DB_PASSWORD}"    # Or use: "credential:analytics_db"
+    tables:
+      - name: user_events
+        description: "User activity events"
+        schema: public
+        options:
+          table_name: events
+          schema_name: public
+          use_remote_estimate: true
+          fetch_size: 1000
+        columns:
+          - name: id
+            type: bigint
+            not_null: true
+            description: "Event ID"
+          - name: user_id
+            type: integer
+            not_null: true
+            description: "User identifier"
+          - name: event_type
+            type: varchar(50)
+            not_null: true
+            description: "Type of event"
+          - name: event_data
+            type: jsonb
+            description: "Event payload"
+          - name: created_at
+            type: timestamptz
+            not_null: true
+            description: "Event timestamp"
+      
+      - name: user_profiles
+        description: "User profile information"
+        options:
+          table_name: users
+          schema_name: public
+        columns:
+          - name: id
+            type: integer
+            not_null: true
+          - name: username
+            type: varchar(100)
+            not_null: true
+          - name: email
+            type: varchar(255)
+            not_null: true
+          - name: first_name
+            type: varchar(50)
+          - name: last_name
+            type: varchar(50)
+          - name: registration_date
+            type: date
+          - name: last_login
+            type: timestamptz
+          - name: is_active
+            type: boolean
+            default: "true"
+
+  # Data Warehouse
+  warehouse_db:
+    type: postgres_fdw
+    description: "Data warehouse for reporting"
+    enabled: true
+    server_options:
+      host: "${WAREHOUSE_DB_HOST}"
+      port: "${WAREHOUSE_DB_PORT:5432}"      # With default value
+      dbname: "warehouse"
+      use_remote_estimate: true
+    user_mapping:
+      options:
+        user: "${WAREHOUSE_DB_USER}"
+        password: "credential:warehouse_db"   # Using credential manager
+    tables:
+      - name: sales_summary
+        description: "Aggregated sales data"
+        options:
+          table_name: daily_sales_summary
+          schema_name: reporting
+        columns:
+          - name: date
+            type: date
+            not_null: true
+          - name: product_category
+            type: varchar(100)
+          - name: total_sales
+            type: decimal(15,2)
+          - name: total_quantity
+            type: integer
+          - name: unique_customers
+            type: integer
+
+      - name: customer_segments
+        description: "Customer segmentation data"
+        options:
+          table_name: customer_segments
+          schema_name: ml_models
+        columns:
+          - name: customer_id
+            type: integer
+            not_null: true
+          - name: segment
+            type: varchar(50)
+          - name: ltv_score
+            type: decimal(10,4)
+          - name: churn_probability
+            type: decimal(5,4)
+          - name: last_updated
+            type: timestamptz
+
+  # Read-only replica for heavy queries
+  replica_db:
+    type: postgres_fdw
+    description: "Read-only replica for analytics queries"
+    enabled: true
+    server_options:
+      host: "${REPLICA_DB_HOST}"
+      port: "5432"
+      dbname: "production"
+      use_remote_estimate: false  # Replicas may have different stats
+    user_mapping:
+      options:
+        user: "readonly_user"
+        password: "${REPLICA_DB_PASSWORD}"
+    tables:
+      - name: orders
+        description: "Order data from replica"
+        options:
+          table_name: orders
+          schema_name: public
+          fetch_size: 5000  # Larger fetch size for analytics
+        # Note: columns can be omitted for type inference
+      
+      - name: order_items
+        description: "Order line items from replica"
+        options:
+          table_name: order_items
+          schema_name: public
+          fetch_size: 5000

@@ -6,6 +6,7 @@ PyYAML>=6.0.2  # Latest stable version
 # Database connectors
 sqlalchemy>=2.0.0,<3.0.0  # SQLAlchemy 2.0.41 (latest)
 psycopg2-binary>=2.9.10  # PostgreSQL - latest with Python 3.13 support
+asyncpg>=0.29.0  # Async PostgreSQL driver for FDW operations
 pymysql>=1.1.0  # MySQL - latest stable
 
 # File format support
@@ -20,8 +21,6 @@ lz4>=4.4.0  # Latest stable version
 requests>=2.32.0  # Latest stable
 urllib3>=2.0.0,<3.0.0  # Compatible with requests
 
-# ML preprocessing
-scikit-learn>=1.5.0  # Latest with Python 3.11-3.13 support
 
 # Optional: encoding detection for CSV files
 chardet>=5.2.0  # Latest stable
@@ -30,6 +29,15 @@ chardet>=5.2.0  # Latest stable
 pytest>=8.0.0  # Latest stable
 pytest-cov>=4.0.0  # Coverage plugin
 pytest-xdist>=3.0.0  # Parallel test execution
+pytest-asyncio>=0.23.0  # Async testing support
+pytest-benchmark>=4.0.0  # Performance benchmarking
+pytest-mock>=3.12.0  # Mock fixtures
+testcontainers>=4.0.0  # Docker container testing
+factory-boy>=3.3.0  # Test data factories
+faker>=22.0.0  # Fake data generation
+httpx>=0.27.0  # HTTP client for API testing
+fastapi>=0.109.0  # Mock API server
+uvicorn>=0.27.0  # ASGI server for testing
 black>=24.0.0  # Code formatter
 flake8>=7.0.0  # Linting
 mypy>=1.8.0  # Type checking
@@ -41,3 +49,6 @@ zstandard>=0.22.0  # High-performance compression
 cryptography>=42.0.0  # Encryption and secure credential management
 keyring>=25.0.0  # System credential storage
 psutil>=5.9.0  # System resource monitoring
+
+# Configuration and schema validation
+jsonschema>=4.20.0  # JSON schema validation for FDW configurations

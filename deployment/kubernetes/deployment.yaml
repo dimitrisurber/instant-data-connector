@@ -1,0 +1,698 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres-fdw
+  namespace: instant-connector
+  labels:
+    app: postgres-fdw
+    component: database
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate  # Only one PostgreSQL master at a time
+  selector:
+    matchLabels:
+      app: postgres-fdw
+      component: database
+  template:
+    metadata:
+      labels:
+        app: postgres-fdw
+        component: database
+    spec:
+      securityContext:
+        fsGroup: 999  # postgres group
+      containers:
+      - name: postgres-fdw
+        image: instant-data-connector/postgres-fdw:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 5432
+          name: postgresql
+        env:
+        - name: POSTGRES_DB
+          valueFrom:
+            configMapKeyRef:
+              name: postgres-config
+              key: POSTGRES_DB
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              name: connector-secrets
+              key: POSTGRES_USER
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: connector-secrets
+              key: POSTGRES_PASSWORD
+        - name: POSTGRES_INITDB_ARGS
+          valueFrom:
+            configMapKeyRef:
+              name: postgres-config
+              key: POSTGRES_INITDB_ARGS
+        - name: PGDATA
+          valueFrom:
+            configMapKeyRef:
+              name: postgres-config
+              key: PGDATA
+        volumeMounts:
+        - name: postgres-data
+          mountPath: /var/lib/postgresql/data
+        - name: postgres-ssl
+          mountPath: /var/lib/postgresql/ssl
+          readOnly: true
+        - name: postgres-backups
+          mountPath: /var/lib/postgresql/backups
+        resources:
+          requests:
+            memory: "2Gi"
+            cpu: "1000m"
+          limits:
+            memory: "4Gi"
+            cpu: "2000m"
+        livenessProbe:
+          exec:
+            command:
+            - pg_isready
+            - -U
+            - $(POSTGRES_USER)
+            - -d
+            - $(POSTGRES_DB)
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          exec:
+            command:
+            - pg_isready
+            - -U
+            - $(POSTGRES_USER) 
+            - -d
+            - $(POSTGRES_DB)
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+      volumes:
+      - name: postgres-data
+        persistentVolumeClaim:
+          claimName: postgres-data-pvc
+      - name: postgres-ssl
+        secret:
+          secretName: postgres-ssl-certs
+          defaultMode: 0600
+      - name: postgres-backups
+        persistentVolumeClaim:
+          claimName: postgres-backups-pvc
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres-replica
+  namespace: instant-connector
+  labels:
+    app: postgres-replica
+    component: database-replica
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: postgres-replica
+      component: database-replica
+  template:
+    metadata:
+      labels:
+        app: postgres-replica
+        component: database-replica
+    spec:
+      securityContext:
+        fsGroup: 999
+      containers:
+      - name: postgres-replica
+        image: instant-data-connector/postgres-fdw:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 5432
+          name: postgresql
+        env:
+        - name: POSTGRES_DB
+          valueFrom:
+            configMapKeyRef:
+              name: postgres-config
+              key: POSTGRES_DB
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              name: connector-secrets
+              key: POSTGRES_USER
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: connector-secrets
+              key: POSTGRES_PASSWORD
+        - name: POSTGRES_REPLICA_USER
+          valueFrom:
+            secretKeyRef:
+              name: connector-secrets
+              key: POSTGRES_REPLICA_USER
+        - name: POSTGRES_REPLICA_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: connector-secrets
+              key: POSTGRES_REPLICA_PASSWORD
+        - name: POSTGRES_MASTER_HOST
+          value: "postgres-fdw-service"
+        - name: POSTGRES_MASTER_PORT
+          value: "5432"
+        volumeMounts:
+        - name: postgres-replica-data
+          mountPath: /var/lib/postgresql/data
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+        livenessProbe:
+          exec:
+            command:
+            - pg_isready
+            - -U
+            - $(POSTGRES_USER)
+            - -d
+            - $(POSTGRES_DB)
+          initialDelaySeconds: 120
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          exec:
+            command:
+            - pg_isready
+            - -U
+            - $(POSTGRES_USER)
+            - -d
+            - $(POSTGRES_DB)
+          initialDelaySeconds: 60
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+      volumes:
+      - name: postgres-replica-data
+        persistentVolumeClaim:
+          claimName: postgres-replica-data-pvc
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: instant-connector
+  labels:
+    app: redis
+    component: cache
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: redis
+      component: cache
+  template:
+    metadata:
+      labels:
+        app: redis
+        component: cache
+    spec:
+      containers:
+      - name: redis
+        image: redis:7-alpine
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 6379
+          name: redis
+        env:
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: connector-secrets
+              key: REDIS_PASSWORD
+        command:
+        - redis-server
+        - /usr/local/etc/redis/redis.conf
+        - --requirepass
+        - $(REDIS_PASSWORD)
+        volumeMounts:
+        - name: redis-config
+          mountPath: /usr/local/etc/redis
+        - name: redis-data
+          mountPath: /data
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "200m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+        livenessProbe:
+          exec:
+            command:
+            - redis-cli
+            - --no-auth-warning
+            - -a
+            - $(REDIS_PASSWORD)
+            - ping
+          initialDelaySeconds: 30
+          periodSeconds: 30
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          exec:
+            command:
+            - redis-cli
+            - --no-auth-warning
+            - -a
+            - $(REDIS_PASSWORD)
+            - ping
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+      volumes:
+      - name: redis-config
+        configMap:
+          name: redis-config
+      - name: redis-data
+        persistentVolumeClaim:
+          claimName: redis-data-pvc
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: connector-app
+  namespace: instant-connector
+  labels:
+    app: instant-data-connector
+    component: application
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: instant-data-connector
+      component: application
+  template:
+    metadata:
+      labels:
+        app: instant-data-connector
+        component: application
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+      - name: connector-app
+        image: instant-data-connector:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8000
+          name: http
+        env:
+        - name: DATABASE_URL
+          value: "postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@postgres-fdw-service:5432/$(POSTGRES_DB)"
+        - name: DATABASE_READ_URL
+          value: "postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@postgres-replica-service:5432/$(POSTGRES_DB)"
+        - name: REDIS_URL
+          value: "redis://:$(REDIS_PASSWORD)@redis-service:6379/0"
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              name: connector-secrets
+              key: POSTGRES_USER
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: connector-secrets
+              key: POSTGRES_PASSWORD
+        - name: POSTGRES_DB
+          valueFrom:
+            configMapKeyRef:
+              name: postgres-config
+              key: POSTGRES_DB
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: connector-secrets
+              key: REDIS_PASSWORD
+        - name: SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: connector-secrets
+              key: SECRET_KEY
+        - name: ENCRYPTION_KEY
+          valueFrom:
+            secretKeyRef:
+              name: connector-secrets
+              key: ENCRYPTION_KEY
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: connector-secrets
+              key: JWT_SECRET
+        envFrom:
+        - configMapRef:
+            name: connector-config
+        volumeMounts:
+        - name: connector-data
+          mountPath: /app/data
+        - name: connector-logs
+          mountPath: /app/logs
+        - name: connector-cache
+          mountPath: /app/cache
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        startupProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          failureThreshold: 30
+          periodSeconds: 10
+      volumes:
+      - name: connector-data
+        persistentVolumeClaim:
+          claimName: connector-data-pvc
+      - name: connector-logs
+        persistentVolumeClaim:
+          claimName: connector-logs-pvc
+      - name: connector-cache
+        emptyDir: {}
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: celery-worker
+  namespace: instant-connector
+  labels:
+    app: celery-worker
+    component: worker
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: celery-worker
+      component: worker
+  template:
+    metadata:
+      labels:
+        app: celery-worker
+        component: worker
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+      - name: celery-worker
+        image: instant-data-connector:latest
+        imagePullPolicy: Always
+        command:
+        - celery
+        - -A
+        - src.instant_connector.celery_app
+        - worker
+        - -l
+        - INFO
+        - --concurrency=4
+        env:
+        - name: DATABASE_URL
+          value: "postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@postgres-fdw-service:5432/$(POSTGRES_DB)"
+        - name: REDIS_URL
+          value: "redis://:$(REDIS_PASSWORD)@redis-service:6379/0"
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              name: connector-secrets
+              key: POSTGRES_USER
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: connector-secrets
+              key: POSTGRES_PASSWORD
+        - name: POSTGRES_DB
+          valueFrom:
+            configMapKeyRef:
+              name: postgres-config
+              key: POSTGRES_DB
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: connector-secrets
+              key: REDIS_PASSWORD
+        - name: SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: connector-secrets
+              key: SECRET_KEY
+        envFrom:
+        - configMapRef:
+            name: connector-config
+        volumeMounts:
+        - name: connector-data
+          mountPath: /app/data
+        - name: connector-logs
+          mountPath: /app/logs
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+        livenessProbe:
+          exec:
+            command:
+            - celery
+            - -A
+            - src.instant_connector.celery_app
+            - inspect
+            - ping
+          initialDelaySeconds: 60
+          periodSeconds: 60
+          timeoutSeconds: 30
+          failureThreshold: 3
+      volumes:
+      - name: connector-data
+        persistentVolumeClaim:
+          claimName: connector-data-pvc
+      - name: connector-logs
+        persistentVolumeClaim:
+          claimName: connector-logs-pvc
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: celery-beat
+  namespace: instant-connector
+  labels:
+    app: celery-beat
+    component: scheduler
+spec:
+  replicas: 1  # Only one scheduler instance
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: celery-beat
+      component: scheduler
+  template:
+    metadata:
+      labels:
+        app: celery-beat
+        component: scheduler
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+      - name: celery-beat
+        image: instant-data-connector:latest
+        imagePullPolicy: Always
+        command:
+        - celery
+        - -A
+        - src.instant_connector.celery_app
+        - beat
+        - -l
+        - INFO
+        - --pidfile=/tmp/celerybeat.pid
+        env:
+        - name: DATABASE_URL
+          value: "postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@postgres-fdw-service:5432/$(POSTGRES_DB)"
+        - name: REDIS_URL
+          value: "redis://:$(REDIS_PASSWORD)@redis-service:6379/0"
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              name: connector-secrets
+              key: POSTGRES_USER
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: connector-secrets
+              key: POSTGRES_PASSWORD
+        - name: POSTGRES_DB
+          valueFrom:
+            configMapKeyRef:
+              name: postgres-config
+              key: POSTGRES_DB
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: connector-secrets
+              key: REDIS_PASSWORD
+        - name: SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: connector-secrets
+              key: SECRET_KEY
+        envFrom:
+        - configMapRef:
+            name: connector-config
+        volumeMounts:
+        - name: celery-beat-data
+          mountPath: /app/celerybeat-schedule
+        - name: connector-logs
+          mountPath: /app/logs
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+      volumes:
+      - name: celery-beat-data
+        persistentVolumeClaim:
+          claimName: celery-beat-data-pvc
+      - name: connector-logs
+        persistentVolumeClaim:
+          claimName: connector-logs-pvc
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx
+  namespace: instant-connector
+  labels:
+    app: nginx
+    component: proxy
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: nginx
+      component: proxy
+  template:
+    metadata:
+      labels:
+        app: nginx
+        component: proxy
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101  # nginx user
+        fsGroup: 101
+      containers:
+      - name: nginx
+        image: nginx:alpine
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 80
+          name: http
+        - containerPort: 443
+          name: https
+        volumeMounts:
+        - name: nginx-config
+          mountPath: /etc/nginx/nginx.conf
+          subPath: nginx.conf
+        - name: nginx-ssl
+          mountPath: /etc/nginx/ssl
+          readOnly: true
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+        livenessProbe:
+          httpGet:
+            path: /nginx-health
+            port: 80
+          initialDelaySeconds: 30
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /nginx-health
+            port: 80
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+      volumes:
+      - name: nginx-config
+        configMap:
+          name: nginx-config
+      - name: nginx-ssl
+        secret:
+          secretName: nginx-ssl-certs
+          defaultMode: 0600

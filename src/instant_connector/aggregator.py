@@ -1,19 +1,39 @@
-"""Main data aggregation engine for combining multiple data sources."""
+"""
+DEPRECATED: Legacy data aggregation engine for combining multiple data sources.
+
+This module is deprecated and maintained only for backward compatibility.
+Use the new FDW-based InstantDataConnector from connector.py for better
+performance and scalability.
+"""
 
 import pandas as pd
 from typing import Dict, Any, List, Optional, Union
 import logging
+import warnings
 from pathlib import Path
 import yaml
 import psutil
 import os
 from .sources import DatabaseSource, FileSource, APISource
-from .ml_optimizer import MLOptimizer
 from .secure_serializer import SecureSerializer, save_data_connector, load_data_connector
 from .secure_credentials import SecureCredentialManager, get_global_credential_manager
 from .pickle_manager import PickleManager
 
 logger = logging.getLogger(__name__)
+
+# Security exception for blocking unsafe operations
+class SecurityError(Exception):
+    """Exception raised for security-related violations."""
+    pass
+
+# Deprecation warning for the entire module
+warnings.warn(
+    "The aggregator module is deprecated. Use the new FDW-based InstantDataConnector "
+    "from instant_connector.connector for better performance and scalability. "
+    "This legacy module will be removed in version 1.0.0.",
+    DeprecationWarning,
+    stacklevel=2
+)
 
 # Security limits
 MAX_MEMORY_USAGE_MB = 2048  # 2GB default
@@ -47,10 +67,7 @@ class InstantDataConnector:
         self.config = {}
         self.sources = {}
         self.raw_data = {}
-        self.ml_ready_data = {}
         self.metadata = {}
-        self.ml_artifacts = {}
-        self.ml_optimizer = None
         
         # Security settings
         self.max_memory_mb = max_memory_mb
@@ -72,11 +89,9 @@ class InstantDataConnector:
     def _validate_memory_usage(self) -> None:
         """Validate current memory usage against limits."""
         total_memory = 0
-        for section in ['raw_data', 'ml_ready_data']:
-            data_dict = getattr(self, section, {})
-            for name, df in data_dict.items():
-                if isinstance(df, pd.DataFrame):
-                    total_memory += df.memory_usage(deep=True).sum()
+        for name, df in self.raw_data.items():
+            if isinstance(df, pd.DataFrame):
+                total_memory += df.memory_usage(deep=True).sum()
         
         total_memory_mb = total_memory / (1024 * 1024)
         if total_memory_mb > self.max_memory_mb:
@@ -85,11 +100,9 @@ class InstantDataConnector:
     def _validate_total_rows(self) -> None:
         """Validate total row count against limits."""
         total_rows = 0
-        for section in ['raw_data', 'ml_ready_data']:
-            data_dict = getattr(self, section, {})
-            for name, df in data_dict.items():
-                if isinstance(df, pd.DataFrame):
-                    total_rows += len(df)
+        for name, df in self.raw_data.items():
+            if isinstance(df, pd.DataFrame):
+                total_rows += len(df)
         
         if total_rows > self.max_rows:
             raise ValueError(f"Total rows ({total_rows:,}) exceeds limit ({self.max_rows:,})")
@@ -102,7 +115,17 @@ class InstantDataConnector:
             logger.warning(f"Low system memory: {available_memory_mb:.1f} MB available")
     
     def load_config(self, config_path: Union[str, Path]):
-        """Load configuration from YAML file."""
+        """
+        Load configuration from YAML file.
+        
+        DEPRECATED: Use the new FDW-based InstantDataConnector.load_config() instead.
+        """
+        warnings.warn(
+            "load_config is deprecated. Use the new FDW-based InstantDataConnector "
+            "for better performance and scalability.",
+            DeprecationWarning,
+            stacklevel=2
+        )
         config_path = Path(config_path)
         
         if not config_path.exists():
@@ -344,40 +367,6 @@ class InstantDataConnector:
                 endpoints = api_config.pop('endpoints', {})
                 self.add_api_source(source_name, base_url, endpoints, **api_config)
     
-    def optimize_datasets(
-        self,
-        optimizer: Optional[MLOptimizer] = None,
-        **optimizer_kwargs
-    ) -> Dict[str, pd.DataFrame]:
-        """
-        Apply ML optimizations to all datasets.
-        
-        Args:
-            optimizer: MLOptimizer instance (creates new if None)
-            **optimizer_kwargs: Arguments for optimize_dataframe
-            
-        Returns:
-            Optimized datasets
-        """
-        if not self.raw_data:
-            raise ValueError("No datasets to optimize. Run extract_data first.")
-        
-        if optimizer is None:
-            optimizer = MLOptimizer()
-        
-        optimized = {}
-        
-        for name, df in self.raw_data.items():
-            logger.info(f"Optimizing dataset: {name}")
-            try:
-                df_optimized = optimizer.optimize_dataframe(df, **optimizer_kwargs)
-                optimized[name] = df_optimized
-            except Exception as e:
-                logger.error(f"Failed to optimize {name}: {e}")
-                optimized[name] = df
-        
-        self.ml_ready_data = optimized
-        return optimized
     
     def save_connector(
         self,
@@ -440,7 +429,7 @@ class InstantDataConnector:
         
         Args:
             output_path: Output file path
-            optimize: Whether to apply ML optimizations
+            optimize: Whether to apply basic data type optimizations
             compression: Compression method
             **kwargs: Additional arguments
             
@@ -451,10 +440,11 @@ class InstantDataConnector:
         logger.info("Starting data aggregation pipeline")
         self.extract_data()
         
-        # Optimize if requested
+        # Apply basic data type optimization if requested
         if optimize:
-            optimizer_kwargs = kwargs.pop('optimizer_kwargs', {})
-            self.optimize_datasets(**optimizer_kwargs)
+            pickle_manager_temp = PickleManager()
+            for name, df in self.raw_data.items():
+                self.raw_data[name] = pickle_manager_temp.optimize_dtypes(df)
         
         # Save connector
         pickle_manager = PickleManager(compression=compression)
@@ -464,7 +454,17 @@ class InstantDataConnector:
         return save_stats
     
     def aggregate_all(self):
-        """Aggregate data from all configured sources with security validation."""
+        """
+        Aggregate data from all configured sources with security validation.
+        
+        DEPRECATED: Use the new FDW-based InstantDataConnector for better performance.
+        """
+        warnings.warn(
+            "aggregate_all is deprecated. Use the new FDW-based InstantDataConnector "
+            "with lazy_load_table() for better performance and scalability.",
+            DeprecationWarning,
+            stacklevel=2
+        )
         logger.info("Starting data aggregation from all sources")
         
         # Validate system resources before starting
@@ -578,56 +578,19 @@ class InstantDataConnector:
                 logger.error(f"Failed to extract from endpoint {endpoint} in {source_name}: {e}")
         return data
     
-    def configure_ml_optimization(self, **kwargs):
-        """Configure ML optimization settings."""
-        if self.ml_optimizer is None:
-            from .ml_optimizer import MLOptimizer
-            self.ml_optimizer = MLOptimizer()
-        
-        # Set configuration options
-        for key, value in kwargs.items():
-            if hasattr(self.ml_optimizer, key):
-                setattr(self.ml_optimizer, key, value)
-        
-        logger.info(f"Configured ML optimizer with options: {kwargs}")
-    
-    def apply_ml_optimization(self, target_column=None, **kwargs):
-        """Apply ML optimization to raw data."""
-        if not self.raw_data:
-            raise ValueError("No raw data to optimize. Run aggregate_all first.")
-        
-        if self.ml_optimizer is None:
-            from .ml_optimizer import MLOptimizer
-            self.ml_optimizer = MLOptimizer()
-        
-        # Apply optimization to each dataset
-        for name, df in self.raw_data.items():
-            try:
-                if target_column and target_column in df.columns:
-                    # Handle target column separately for train/test split
-                    optimized_data = self.ml_optimizer.optimize_for_ml(
-                        df, target_column=target_column, **kwargs
-                    )
-                    # Add train/test splits to ml_ready_data
-                    for key, value in optimized_data.items():
-                        self.ml_ready_data[key] = value
-                else:
-                    # Standard optimization
-                    optimized_df = self.ml_optimizer.optimize_dataframe(df)
-                    self.ml_ready_data[name] = optimized_df
-                
-            except Exception as e:
-                logger.error(f"Failed to optimize dataset {name}: {e}")
-                # Keep original data if optimization fails
-                self.ml_ready_data[name] = df
-        
-        # Store preprocessing metadata
-        self.ml_artifacts['preprocessing_metadata'] = self.ml_optimizer.get_preprocessing_info()
-        
-        logger.info(f"Applied ML optimization to {len(self.ml_ready_data)} datasets")
     
     def save_pickle(self, output_path=None, **kwargs):
-        """Save data using secure serialization (or legacy pickle if configured)."""
+        """
+        Save data using secure serialization (or legacy pickle if configured).
+        
+        DEPRECATED: Use the new FDW-based InstantDataConnector with caching instead.
+        """
+        warnings.warn(
+            "save_pickle is deprecated. Use the new FDW-based InstantDataConnector "
+            "with built-in caching for better performance.",
+            DeprecationWarning,
+            stacklevel=2
+        )
         if output_path is None:
             from datetime import datetime
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -646,9 +609,7 @@ class InstantDataConnector:
         # Prepare data for saving
         data_to_save = {
             'raw_data': self.raw_data,
-            'ml_ready_data': self.ml_ready_data,
-            'metadata': self.metadata,
-            'ml_artifacts': self.ml_artifacts
+            'metadata': self.metadata
         }
         
         if self.use_secure_serialization:
@@ -656,20 +617,14 @@ class InstantDataConnector:
             secure_kwargs = {k: v for k, v in kwargs.items() if k in ['add_metadata', 'validate']}
             return self.serializer.serialize_datasets(data_to_save, output_path, **secure_kwargs)
         else:
-            # Use legacy pickle manager (deprecated)
-            logger.warning("Using legacy pickle serialization - consider enabling secure serialization")
-            from .pickle_manager import PickleManager
-            pickle_manager = PickleManager()
-            
-            return pickle_manager.save_data_connector(
-                data_to_save['raw_data'],
-                output_path,
-                metadata={
-                    'ml_ready_data': data_to_save['ml_ready_data'],
-                    'metadata': data_to_save['metadata'],
-                    'ml_artifacts': data_to_save['ml_artifacts']
-                },
-                **kwargs
+            # CRITICAL SECURITY WARNING - block unsafe pickle usage
+            logger.error(
+                "CRITICAL SECURITY WARNING: Unsafe pickle serialization is disabled due to "
+                "remote code execution vulnerability (CVSS 9.8). Use secure_serialization=True."
+            )
+            raise SecurityError(
+                "Unsafe pickle serialization blocked for security. "
+                "Set use_secure_serialization=True (default) to use secure JSON-based serialization."
             )
     
     def load_from_config(self, config):
@@ -724,11 +679,6 @@ class InstantDataConnector:
                 else:
                     raise ValueError(f"Unknown source type: {source_type}")
         
-        # Configure ML optimization
-        if 'ml_optimization' in config and config['ml_optimization'].get('enabled', False):
-            ml_config = config['ml_optimization'].copy()
-            ml_config.pop('enabled', None)
-            self.configure_ml_optimization(**ml_config)
         
         logger.info(f"Loaded configuration with {len(self.sources)} sources")
     
@@ -736,8 +686,7 @@ class InstantDataConnector:
         """Get summary of aggregated data."""
         summary = {
             'total_sources': self.metadata.get('total_sources', len(self.sources)),
-            'total_raw_tables': len(self.raw_data),
-            'total_ml_ready_tables': len(self.ml_ready_data),
+            'total_tables': len(self.raw_data),
             'total_rows': sum(len(df) for df in self.raw_data.values()),
             'memory_usage_mb': sum(df.memory_usage(deep=True).sum() for df in self.raw_data.values()) / 1024**2
         }

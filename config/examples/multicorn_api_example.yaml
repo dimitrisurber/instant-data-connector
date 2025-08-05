@@ -1,0 +1,413 @@
+# Multicorn FDW Configuration Example
+# This example demonstrates using Multicorn to connect to REST APIs and custom data sources
+
+version: "1.0"
+
+metadata:
+  name: "Multicorn FDW Example"
+  description: "Example configuration for connecting to REST APIs and custom data sources using Multicorn"
+  author: "Data Engineering Team"
+  created: "2024-01-01T00:00:00Z"
+  tags:
+    - "multicorn"
+    - "api"
+    - "rest"
+    - "custom-sources"
+
+global_settings:
+  connection_timeout: 60
+  query_timeout: 600
+  retry_attempts: 3
+  enable_push_down: false  # Multicorn typically doesn't support push-down
+
+sources:
+  # REST API source using RestFDW
+  api_service:
+    type: multicorn
+    description: "REST API service integration"
+    enabled: true
+    server_options:
+      wrapper: "multicorn.restfdw.RestFDW"
+    user_mapping:
+      user: current_user
+      options:
+        request_handler: "multicorn.restfdw.RequestHandler"
+    tables:
+      - name: api_users
+        description: "Users from REST API"
+        schema: public
+        options:
+          base_url: "${API_BASE_URL}/users"
+          format: "json"
+          auth_type: "bearer"
+          auth_token: "${API_TOKEN}"
+          method: "GET"
+          timeout: 30
+          cache_duration: 300  # 5 minutes
+        columns:
+          - name: id
+            type: integer
+            not_null: true
+            description: "User ID"
+          - name: username
+            type: varchar(100)
+            not_null: true
+            description: "Username"
+          - name: email
+            type: varchar(255)
+            not_null: true
+            description: "Email address"
+          - name: first_name
+            type: varchar(50)
+            description: "First name"
+          - name: last_name
+            type: varchar(50)
+            description: "Last name"
+          - name: created_at
+            type: timestamptz
+            description: "Account creation date"
+          - name: is_active
+            type: boolean
+            default: "true"
+            description: "Account status"
+          - name: role
+            type: varchar(50)
+            description: "User role"
+          - name: last_login
+            type: timestamptz
+            description: "Last login timestamp"
+
+      - name: api_orders
+        description: "Orders from REST API"
+        options:
+          base_url: "${API_BASE_URL}/orders"
+          format: "json"
+          auth_type: "api_key"
+          auth_header: "X-API-Key"
+          auth_token: "${API_KEY}"
+          method: "GET"
+          pagination: true
+          page_size: 100
+          cache_duration: 60  # 1 minute
+        columns:
+          - name: id
+            type: bigint
+            not_null: true
+            description: "Order ID"
+          - name: customer_id
+            type: integer
+            not_null: true
+            description: "Customer ID"
+          - name: order_number
+            type: varchar(50)
+            not_null: true
+            description: "Order number"
+          - name: status
+            type: varchar(20)
+            not_null: true
+            description: "Order status"
+          - name: total_amount
+            type: decimal(12,2)
+            not_null: true
+            description: "Total order amount"
+          - name: currency
+            type: varchar(3)
+            default: "'USD'"
+            description: "Currency code"
+          - name: order_date
+            type: timestamptz
+            not_null: true
+            description: "Order timestamp"
+          - name: shipping_address
+            type: jsonb
+            description: "Shipping address as JSON"
+          - name: items
+            type: jsonb
+            description: "Order items as JSON array"
+
+  # Custom Python FDW wrapper
+  custom_data_source:
+    type: multicorn
+    description: "Custom data source using Python wrapper"
+    enabled: true
+    server_options:
+      wrapper: "data_connectors.custom_fdw.CustomDataWrapper"
+      data_source_type: "mongodb"
+      connection_string: "${MONGODB_URI}"
+      collection_name: "products"
+    user_mapping:
+      options:
+        username: "${MONGODB_USER}"
+        password: "${MONGODB_PASSWORD}"
+    tables:
+      - name: mongodb_products
+        description: "Products from MongoDB via custom wrapper"
+        options:
+          collection: "products"
+          query_filter: '{"is_active": true}'
+          projection: '{"_id": 1, "name": 1, "price": 1, "category": 1, "created_at": 1}'
+        columns:
+          - name: id
+            type: varchar(24)
+            not_null: true
+            description: "MongoDB ObjectId as string"
+          - name: name
+            type: varchar(255)
+            not_null: true
+            description: "Product name"
+          - name: price
+            type: decimal(10,2)
+            not_null: true
+            description: "Product price"
+          - name: category
+            type: varchar(100)
+            description: "Product category"
+          - name: created_at
+            type: timestamptz
+            description: "Creation timestamp"
+
+  # RSS/XML Feed source
+  rss_feeds:
+    type: multicorn
+    description: "RSS/XML feed integration"
+    enabled: true
+    server_options:
+      wrapper: "multicorn.rssfdw.RssFdw"
+    tables:
+      - name: news_feed
+        description: "News articles from RSS feed"
+        options:
+          feed_url: "${NEWS_RSS_URL}"
+          update_interval: 1800  # 30 minutes
+          max_items: 100
+        columns:
+          - name: id
+            type: varchar(255)
+            not_null: true
+            description: "Article ID/GUID"
+          - name: title
+            type: text
+            not_null: true
+            description: "Article title"
+          - name: description
+            type: text
+            description: "Article description"
+          - name: link
+            type: text
+            description: "Article URL"
+          - name: published_date
+            type: timestamptz
+            description: "Publication date"
+          - name: author
+            type: varchar(255)
+            description: "Article author"
+          - name: category
+            type: varchar(100)
+            description: "Article category"
+
+  # GitHub API integration
+  github_api:
+    type: multicorn
+    description: "GitHub API integration for repository data"
+    enabled: true
+    server_options:
+      wrapper: "multicorn.githubapifdw.GitHubAPIFdw"
+    user_mapping:
+      options:
+        token: "${GITHUB_API_TOKEN}"
+        user_agent: "PostgreSQL-FDW-Connector/1.0"
+    tables:
+      - name: github_repositories
+        description: "GitHub repositories"
+        options:
+          endpoint: "repos"
+          owner: "${GITHUB_ORG}"
+          per_page: 100
+          include_forks: false
+        columns:
+          - name: id
+            type: bigint
+            not_null: true
+            description: "Repository ID"
+          - name: name
+            type: varchar(255)
+            not_null: true
+            description: "Repository name"
+          - name: full_name
+            type: varchar(255)
+            not_null: true
+            description: "Full repository name"
+          - name: description
+            type: text
+            description: "Repository description"
+          - name: language
+            type: varchar(50)
+            description: "Primary programming language"
+          - name: stars_count
+            type: integer
+            description: "Number of stars"
+          - name: forks_count
+            type: integer
+            description: "Number of forks"
+          - name: open_issues_count
+            type: integer
+            description: "Number of open issues"
+          - name: created_at
+            type: timestamptz
+            description: "Repository creation date"
+          - name: updated_at
+            type: timestamptz
+            description: "Last update date"
+          - name: is_private
+            type: boolean
+            description: "Whether repository is private"
+
+      - name: github_issues
+        description: "GitHub issues"
+        options:
+          endpoint: "issues"
+          owner: "${GITHUB_ORG}"
+          repo: "${GITHUB_REPO}"
+          state: "all"
+          per_page: 100
+        columns:
+          - name: id
+            type: bigint
+            not_null: true
+            description: "Issue ID"
+          - name: number
+            type: integer
+            not_null: true
+            description: "Issue number"
+          - name: title
+            type: text
+            not_null: true
+            description: "Issue title"
+          - name: body
+            type: text
+            description: "Issue body"
+          - name: state
+            type: varchar(20)
+            not_null: true
+            description: "Issue state (open/closed)"
+          - name: user_login
+            type: varchar(255)
+            description: "Issue creator username"
+          - name: assignee_login
+            type: varchar(255)
+            description: "Assignee username"
+          - name: labels
+            type: jsonb
+            description: "Issue labels as JSON array"
+          - name: created_at
+            type: timestamptz
+            not_null: true
+            description: "Issue creation date"
+          - name: updated_at
+            type: timestamptz
+            description: "Last update date"
+          - name: closed_at
+            type: timestamptz
+            description: "Issue closure date"
+
+  # Elasticsearch integration
+  elasticsearch_logs:
+    type: multicorn
+    description: "Elasticsearch log data integration"
+    enabled: true
+    server_options:
+      wrapper: "multicorn.elasticsearchfdw.ElasticsearchFdw"
+      host: "${ELASTICSEARCH_HOST}"
+      port: "${ELASTICSEARCH_PORT:9200}"
+      index: "application-logs-*"
+      timeout: 30
+      scroll_size: 1000
+    user_mapping:
+      options:
+        username: "${ELASTICSEARCH_USER}"
+        password: "${ELASTICSEARCH_PASSWORD}"
+    tables:
+      - name: application_logs
+        description: "Application logs from Elasticsearch"
+        options:
+          doc_type: "_doc"
+          query: '{"query": {"range": {"@timestamp": {"gte": "now-7d"}}}}'
+          sort: '[{"@timestamp": {"order": "desc"}}]'
+        columns:
+          - name: timestamp
+            type: timestamptz
+            not_null: true
+            description: "Log timestamp"
+          - name: level
+            type: varchar(20)
+            not_null: true
+            description: "Log level"
+          - name: message
+            type: text
+            not_null: true
+            description: "Log message"
+          - name: service
+            type: varchar(100)
+            description: "Service name"
+          - name: host
+            type: varchar(255)
+            description: "Host name"
+          - name: request_id
+            type: varchar(255)
+            description: "Request ID for tracing"
+          - name: user_id
+            type: varchar(100)
+            description: "User ID if applicable"
+          - name: duration_ms
+            type: integer
+            description: "Request duration in milliseconds"
+          - name: status_code
+            type: integer
+            description: "HTTP status code"
+          - name: error_details
+            type: jsonb
+            description: "Error details as JSON"
+
+  # Redis integration for caching data
+  redis_cache:
+    type: multicorn
+    description: "Redis cache data integration"
+    enabled: true
+    server_options:
+      wrapper: "multicorn.redisfdw.RedisFdw"
+      host: "${REDIS_HOST}"
+      port: "${REDIS_PORT:6379}"
+      db: "${REDIS_DB:0}"
+    user_mapping:
+      options:
+        password: "${REDIS_PASSWORD}"
+    tables:
+      - name: redis_sessions
+        description: "User sessions from Redis"
+        options:
+          key_pattern: "session:*"
+          key_type: "hash"
+          ttl_column: true
+        columns:
+          - name: session_id
+            type: varchar(255)
+            not_null: true
+            description: "Session ID extracted from key"
+          - name: user_id
+            type: integer
+            description: "User ID"
+          - name: created_at
+            type: timestamptz
+            description: "Session creation time"
+          - name: last_activity
+            type: timestamptz
+            description: "Last activity time"
+          - name: ip_address
+            type: inet
+            description: "Client IP address"
+          - name: user_agent
+            type: text
+            description: "User agent string"
+          - name: ttl_seconds
+            type: integer
+            description: "Time to live in seconds"

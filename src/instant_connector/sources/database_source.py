@@ -9,6 +9,9 @@ from sqlalchemy import inspect, MetaData, Table
 import numpy as np
 from datetime import datetime
 import hashlib
+import os
+
+from ..secure_credentials import SecureCredentialManager, get_global_credential_manager
 
 logger = logging.getLogger(__name__)
 
@@ -16,13 +19,20 @@ logger = logging.getLogger(__name__)
 class DatabaseSource:
     """Connector for database sources with ML-optimized data extraction and relationship preservation."""
     
-    def __init__(self, connection_params: Dict[str, Any]):
+    def __init__(
+        self, 
+        connection_params: Dict[str, Any],
+        credential_manager: Optional[SecureCredentialManager] = None
+    ):
         """
-        Initialize database connection.
+        Initialize database connection with secure credential management.
         
         Args:
             connection_params: Dictionary containing:
                 - db_type: 'postgresql', 'mysql', or 'sqlite'
+                - host, port, database, username for connection
+                - password: can be plain text, environment variable, or 'credential:name'
+            credential_manager: Optional secure credential manager
                 - host: Database host (not for SQLite)
                 - port: Database port (not for SQLite)
                 - database: Database name
@@ -34,6 +44,7 @@ class DatabaseSource:
         self.connection_params = connection_params
         self.db_type = connection_params.get('db_type', '').lower()
         self.schema = connection_params.get('schema', None)
+        self.credential_manager = credential_manager or get_global_credential_manager()
         self.engine = None
         self.inspector = None
         self.metadata = MetaData()
@@ -57,8 +68,10 @@ class DatabaseSource:
         if self.db_type == 'sqlite':
             return f"sqlite:///{self.connection_params['database']}"
         
-        # URL encode password to handle special characters
-        password = quote_plus(self.connection_params['password'])
+        # Resolve password securely
+        password = self._resolve_password()
+        # URL encode password to handle special characters  
+        password = quote_plus(password) if password else ''
         username = self.connection_params['username']
         host = self.connection_params['host']
         database = self.connection_params['database']
@@ -71,21 +84,139 @@ class DatabaseSource:
             port = port or 3306
             return f"mysql+pymysql://{username}:{password}@{host}:{port}/{database}"
     
+    def _resolve_password(self) -> str:
+        """
+        Securely resolve password from various sources.
+        
+        Supports:
+        - credential:name - from encrypted credential manager
+        - ${ENV_VAR} - from environment variables 
+        - Plain text (discouraged, shows warning)
+        
+        Returns:
+            Resolved password string
+        """
+        password_config = self.connection_params.get('password', '')
+        
+        if not password_config:
+            return ''
+            
+        # Handle credential manager reference
+        if password_config.startswith('credential:'):
+            credential_name = password_config.replace('credential:', '')
+            try:
+                password = self.credential_manager.get_credential(credential_name)
+                if password:
+                    logger.info(f"Retrieved password from credential manager: {credential_name}")
+                    return password
+                else:
+                    logger.error(f"Credential '{credential_name}' not found in credential manager")
+                    return ''
+            except Exception as e:
+                logger.error(f"Error retrieving credential '{credential_name}': {e}")
+                return ''
+        
+        # Handle environment variable reference  
+        if password_config.startswith('${') and password_config.endswith('}'):
+            env_var = password_config[2:-1]  # Remove ${ and }
+            password = os.getenv(env_var, '')
+            if password:
+                logger.info(f"Retrieved password from environment variable: {env_var}")
+                return password
+            else:
+                logger.error(f"Environment variable '{env_var}' not found")
+                return ''
+        
+        # Handle plain text password (security warning)
+        if password_config and password_config not in ['', 'password', 'changeme']:
+            logger.warning(
+                "SECURITY WARNING: Plain text password detected in configuration. "
+                "Use environment variables (${PASS}) or credential manager (credential:name) instead."
+            )
+            return password_config
+            
+        return ''
+    
+    def _get_secure_connect_args(self) -> Dict[str, Any]:
+        """Get security-enhanced connection arguments for database drivers."""
+        connect_args = {}
+        
+        if self.db_type == 'postgresql':
+            connect_args.update({
+                'connect_timeout': int(os.getenv('DB_CONNECT_TIMEOUT', '10')),
+                'command_timeout': int(os.getenv('DB_COMMAND_TIMEOUT', '60')),
+                'server_settings': {
+                    'application_name': 'instant_data_connector',
+                    'search_path': self.schema if self.schema else 'public'
+                }
+            })
+            
+            # SSL configuration for PostgreSQL
+            ssl_mode = os.getenv('DB_SSL_MODE', 'prefer')  # prefer, require, verify-ca, verify-full
+            if ssl_mode in ['require', 'verify-ca', 'verify-full']:
+                connect_args.update({
+                    'sslmode': ssl_mode,
+                    'sslcert': os.getenv('DB_SSL_CERT'),
+                    'sslkey': os.getenv('DB_SSL_KEY'),
+                    'sslrootcert': os.getenv('DB_SSL_CA')
+                })
+                # Remove None values
+                connect_args = {k: v for k, v in connect_args.items() if v is not None}
+                
+        elif self.db_type == 'mysql':
+            connect_args.update({
+                'connect_timeout': int(os.getenv('DB_CONNECT_TIMEOUT', '10')),
+                'read_timeout': int(os.getenv('DB_READ_TIMEOUT', '60')),
+                'write_timeout': int(os.getenv('DB_WRITE_TIMEOUT', '60')),
+                'charset': 'utf8mb4',
+                'use_unicode': True
+            })
+            
+            # SSL configuration for MySQL
+            if os.getenv('DB_SSL_MODE', 'PREFERRED') in ['REQUIRED', 'VERIFY_CA', 'VERIFY_IDENTITY']:
+                connect_args.update({
+                    'ssl_mode': os.getenv('DB_SSL_MODE'),
+                    'ssl_cert': os.getenv('DB_SSL_CERT'),
+                    'ssl_key': os.getenv('DB_SSL_KEY'),
+                    'ssl_ca': os.getenv('DB_SSL_CA')
+                })
+                # Remove None values
+                connect_args = {k: v for k, v in connect_args.items() if v is not None}
+        
+        return connect_args
+    
+    def _mask_connection_string(self, connection_string: str) -> str:
+        """Mask sensitive information in connection string for logging."""
+        import re
+        # Replace password with asterisks
+        masked = re.sub(r'://([^:]+):([^@]+)@', r'://\1:***@', connection_string)
+        return masked
+    
     def connect(self):
         """Establish database connection and initialize inspector."""
         if not self.engine:
             try:
                 connection_string = self._get_connection_string()
+                
+                # Security-enhanced connection parameters
+                connect_args = self._get_secure_connect_args()
+                
                 self.engine = sa.create_engine(
                     connection_string,
                     pool_pre_ping=True,
-                    pool_size=10,
-                    max_overflow=20,
-                    pool_recycle=3600  # Recycle connections after 1 hour
+                    pool_size=min(10, int(os.getenv('DB_POOL_SIZE', '10'))),
+                    max_overflow=min(20, int(os.getenv('DB_MAX_OVERFLOW', '20'))),
+                    pool_recycle=min(3600, int(os.getenv('DB_POOL_RECYCLE', '3600'))),
+                    pool_timeout=min(30, int(os.getenv('DB_POOL_TIMEOUT', '30'))),
+                    connect_args=connect_args
                 )
-                # Test connection
+                # Test connection and log securely (mask sensitive info)
+                masked_connection_string = self._mask_connection_string(connection_string)
+                logger.info(f"Connecting to database: {masked_connection_string}")
+                
                 with self.engine.connect() as conn:
                     conn.execute(sa.text("SELECT 1"))
+                    logger.info("Database connection established successfully")
                 
                 self.inspector = inspect(self.engine)
                 self.metadata.bind = self.engine

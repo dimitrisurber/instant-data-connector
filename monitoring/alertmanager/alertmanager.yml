@@ -1,0 +1,307 @@
+# Alertmanager configuration for PostgreSQL FDW Data Connector
+global:
+  # The smarthost and SMTP sender used for mail notifications.
+  smtp_smarthost: 'smtp.gmail.com:587'
+  smtp_from: 'alerts@instant-connector.example.com'
+  smtp_auth_username: 'alerts@instant-connector.example.com'
+  smtp_auth_password: 'your-smtp-password'
+  smtp_require_tls: true
+
+  # Slack webhook URL
+  slack_api_url: 'https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK'
+
+  # Default values
+  resolve_timeout: 5m
+
+# The directory from which notification templates are read.
+templates:
+  - '/etc/alertmanager/templates/*.tmpl'
+
+# The root route on which each alert enters.
+route:
+  # The labels by which incoming alerts are grouped together.
+  group_by: ['alertname', 'cluster', 'service']
+
+  # When a new group of alerts is created by an incoming alert, wait at
+  # least 'group_wait' to send the initial notification.
+  group_wait: 30s
+
+  # When the first notification was sent, wait 'group_interval' to send a batch
+  # of new alerts that started firing for that group.
+  group_interval: 5m
+
+  # If an alert has successfully been sent, wait 'repeat_interval' to
+  # resend them.
+  repeat_interval: 4h
+
+  # A default receiver
+  receiver: 'default'
+
+  # All the above attributes are inherited by all child routes and can
+  # overwritten on each.
+  routes:
+    # Critical alerts go to multiple channels
+    - match:
+        severity: critical
+      receiver: 'critical-alerts'
+      group_wait: 10s
+      repeat_interval: 1h
+
+    # Database alerts
+    - match:
+        service: database
+      receiver: 'database-team'
+      group_by: ['alertname', 'instance']
+
+    # Application alerts
+    - match:
+        service: application
+      receiver: 'dev-team'
+      group_by: ['alertname', 'instance']
+
+    # FDW-specific alerts
+    - match:
+        service: fdw
+      receiver: 'data-team'
+      group_by: ['alertname', 'server_name']
+
+    # System alerts
+    - match:
+        service: system
+      receiver: 'ops-team'
+      group_by: ['alertname', 'instance']
+
+    # Kubernetes alerts
+    - match:
+        service: kubernetes
+      receiver: 'k8s-team'
+      group_by: ['alertname', 'namespace']
+
+    # Security alerts
+    - match:
+        service: security
+      receiver: 'security-team'
+      repeat_interval: 1h
+
+    # Backup alerts
+    - match:
+        service: backup
+      receiver: 'ops-team'
+      repeat_interval: 12h
+
+# Inhibition rules allow to mute a set of alerts given that another alert is
+# firing.
+inhibit_rules:
+  # Inhibit duplicate alerts
+  - source_match:
+      severity: 'critical'
+    target_match:
+      severity: 'warning'
+    equal: ['alertname', 'instance']
+
+  # If application is down, don't alert on high response time
+  - source_match:
+      alertname: 'ApplicationDown'
+    target_match:
+      alertname: 'ApplicationHighResponseTime'
+    equal: ['instance']
+
+  # If database is down, don't alert on connection issues
+  - source_match:
+      alertname: 'DatabaseDown'
+    target_match:
+      alertname: 'DatabaseHighConnections'
+    equal: ['instance']
+
+receivers:
+  # Default receiver
+  - name: 'default'
+    slack_configs:
+      - api_url: 'https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK'
+        channel: '#alerts'
+        title: 'Instant Connector Alert'
+        text: '{{ range .Alerts }}{{ .Annotations.description }}{{ end }}'
+        color: 'warning'
+
+  # Critical alerts - multiple channels
+  - name: 'critical-alerts'
+    email_configs:
+      - to: 'oncall@instant-connector.example.com'
+        subject: '[CRITICAL] {{ .GroupLabels.alertname }} - {{ .GroupLabels.instance }}'
+        body: |
+          {{ range .Alerts }}
+          Alert: {{ .Annotations.summary }}
+          Description: {{ .Annotations.description }}
+          Instance: {{ .Labels.instance }}
+          Severity: {{ .Labels.severity }}
+          Time: {{ .StartsAt.Format "2006-01-02 15:04:05" }}
+          {{ end }}
+        headers:
+          X-Priority: '1'
+    
+    slack_configs:
+      - api_url: 'https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK'
+        channel: '#critical-alerts'
+        title: '🚨 CRITICAL ALERT 🚨'
+        text: |
+          {{ range .Alerts }}
+          *Alert:* {{ .Annotations.summary }}
+          *Description:* {{ .Annotations.description }}
+          *Instance:* {{ .Labels.instance }}
+          *Time:* {{ .StartsAt.Format "2006-01-02 15:04:05" }}
+          {{ end }}
+        color: 'danger'
+        send_resolved: true
+
+    # PagerDuty integration for critical alerts
+    pagerduty_configs:
+      - routing_key: 'YOUR_PAGERDUTY_INTEGRATION_KEY'
+        description: '{{ .GroupLabels.alertname }} - {{ .GroupLabels.instance }}'
+        severity: 'critical'
+
+  # Database team alerts
+  - name: 'database-team'
+    email_configs:
+      - to: 'database-team@instant-connector.example.com'
+        subject: '[DB] {{ .GroupLabels.alertname }}'
+        body: |
+          Database Alert Details:
+          {{ range .Alerts }}
+          - Alert: {{ .Annotations.summary }}
+          - Description: {{ .Annotations.description }}
+          - Instance: {{ .Labels.instance }}
+          - Database: {{ .Labels.datname }}
+          - Time: {{ .StartsAt.Format "2006-01-02 15:04:05" }}
+          {{ end }}
+
+    slack_configs:
+      - api_url: 'https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK'
+        channel: '#database-alerts'
+        title: '🗄️ Database Alert'
+        text: |
+          {{ range .Alerts }}
+          *Database:* {{ .Labels.datname | default "Unknown" }}
+          *Alert:* {{ .Annotations.summary }}
+          *Description:* {{ .Annotations.description }}
+          {{ end }}
+        color: '{{ if eq .Status "firing" }}warning{{ else }}good{{ end }}'
+
+  # Development team alerts
+  - name: 'dev-team'
+    email_configs:
+      - to: 'dev-team@instant-connector.example.com'
+        subject: '[APP] {{ .GroupLabels.alertname }}'
+        body: |
+          Application Alert:
+          {{ range .Alerts }}
+          - {{ .Annotations.summary }}
+          - {{ .Annotations.description }}
+          - Instance: {{ .Labels.instance }}
+          {{ end }}
+
+    slack_configs:
+      - api_url: 'https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK'
+        channel: '#dev-alerts'
+        title: '🔧 Application Alert'
+        text: |
+          {{ range .Alerts }}
+          *Service:* {{ .Labels.job | default "Unknown" }}
+          *Alert:* {{ .Annotations.summary }}
+          *Description:* {{ .Annotations.description }}
+          {{ end }}
+        color: '{{ if eq .Status "firing" }}warning{{ else }}good{{ end }}'
+
+  # Data team alerts (FDW-specific)
+  - name: 'data-team'
+    email_configs:
+      - to: 'data-team@instant-connector.example.com'
+        subject: '[FDW] {{ .GroupLabels.alertname }}'
+        body: |
+          FDW Alert:
+          {{ range .Alerts }}
+          - Server: {{ .Labels.server_name }}
+          - Alert: {{ .Annotations.summary }}
+          - Description: {{ .Annotations.description }}
+          {{ end }}
+
+    slack_configs:
+      - api_url: 'https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK'
+        channel: '#data-alerts'
+        title: '📊 FDW Alert'
+        text: |
+          {{ range .Alerts }}
+          *FDW Server:* {{ .Labels.server_name | default "Unknown" }}
+          *Alert:* {{ .Annotations.summary }}
+          *Description:* {{ .Annotations.description }}
+          {{ end }}
+        color: '{{ if eq .Status "firing" }}warning{{ else }}good{{ end }}'
+
+  # Operations team alerts
+  - name: 'ops-team'
+    email_configs:
+      - to: 'ops-team@instant-connector.example.com'
+        subject: '[OPS] {{ .GroupLabels.alertname }}'
+        body: |
+          Operations Alert:
+          {{ range .Alerts }}
+          - {{ .Annotations.summary }}
+          - {{ .Annotations.description }}
+          - Instance: {{ .Labels.instance }}
+          {{ end }}
+
+    slack_configs:
+      - api_url: 'https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK'
+        channel: '#ops-alerts'
+        title: '⚙️ Operations Alert'
+        text: |
+          {{ range .Alerts }}
+          *Instance:* {{ .Labels.instance | default "Unknown" }}
+          *Alert:* {{ .Annotations.summary }}
+          *Description:* {{ .Annotations.description }}
+          {{ end }}
+        color: '{{ if eq .Status "firing" }}warning{{ else }}good{{ end }}'
+
+  # Kubernetes team alerts
+  - name: 'k8s-team'
+    slack_configs:
+      - api_url: 'https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK'
+        channel: '#k8s-alerts'
+        title: '☸️ Kubernetes Alert'
+        text: |
+          {{ range .Alerts }}
+          *Namespace:* {{ .Labels.namespace | default "Unknown" }}
+          *Pod:* {{ .Labels.pod | default "Unknown" }}
+          *Alert:* {{ .Annotations.summary }}
+          *Description:* {{ .Annotations.description }}
+          {{ end }}
+        color: '{{ if eq .Status "firing" }}warning{{ else }}good{{ end }}'
+
+  # Security team alerts
+  - name: 'security-team'
+    email_configs:
+      - to: 'security-team@instant-connector.example.com'
+        subject: '[SECURITY] {{ .GroupLabels.alertname }}'
+        body: |
+          Security Alert:
+          {{ range .Alerts }}
+          - {{ .Annotations.summary }}
+          - {{ .Annotations.description }}
+          - Time: {{ .StartsAt.Format "2006-01-02 15:04:05" }}
+          {{ end }}
+        headers:
+          X-Priority: '2'
+
+    slack_configs:
+      - api_url: 'https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK'
+        channel: '#security-alerts'
+        title: '🔒 Security Alert'
+        text: |
+          {{ range .Alerts }}
+          *Alert:* {{ .Annotations.summary }}
+          *Description:* {{ .Annotations.description }}
+          {{ end }}
+        color: 'danger'
+
+# Custom notification templates
+templates:
+  - '/etc/alertmanager/templates/custom.tmpl'

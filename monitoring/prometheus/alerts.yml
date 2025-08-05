@@ -1,0 +1,283 @@
+# Alerting rules for PostgreSQL FDW Data Connector
+groups:
+  - name: instant-connector.rules
+    rules:
+      # Application health alerts
+      - alert: ApplicationDown
+        expr: up{job="instant-connector-app"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: application
+        annotations:
+          summary: "Instant Data Connector application is down"
+          description: "The Instant Data Connector application has been down for more than 1 minute."
+
+      - alert: ApplicationHighResponseTime
+        expr: http_request_duration_seconds{quantile="0.95"} > 2
+        for: 5m
+        labels:
+          severity: warning
+          service: application
+        annotations:
+          summary: "High response time detected"
+          description: "95th percentile response time is {{ $value }}s, which is above the 2s threshold."
+
+      - alert: ApplicationHighErrorRate
+        expr: rate(http_requests_total{status=~"5.."}[5m]) / rate(http_requests_total[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+          service: application
+        annotations:
+          summary: "High error rate detected"
+          description: "Error rate is {{ $value | humanizePercentage }}, which is above the 5% threshold."
+
+      # Database alerts
+      - alert: DatabaseDown
+        expr: up{job="postgresql"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          service: database
+        annotations:
+          summary: "PostgreSQL database is down"
+          description: "PostgreSQL database has been down for more than 2 minutes."
+
+      - alert: DatabaseHighConnections
+        expr: pg_stat_database_numbackends / pg_settings_max_connections > 0.8
+        for: 5m
+        labels:
+          severity: warning
+          service: database
+        annotations:
+          summary: "High database connection usage"
+          description: "Database connection usage is {{ $value | humanizePercentage }}, which is above 80%."
+
+      - alert: DatabaseSlowQueries
+        expr: rate(pg_stat_statements_mean_time_ms[5m]) > 1000
+        for: 10m
+        labels:
+          severity: warning
+          service: database
+        annotations:
+          summary: "Slow database queries detected"
+          description: "Average query time is {{ $value }}ms, which is above the 1000ms threshold."
+
+      - alert: DatabaseReplicationLag
+        expr: pg_replication_lag > 10
+        for: 5m
+        labels:
+          severity: warning
+          service: database
+        annotations:
+          summary: "High database replication lag"
+          description: "Replication lag is {{ $value }} seconds, which may affect read performance."
+
+      - alert: DatabaseDiskSpaceHigh
+        expr: (pg_database_size_bytes / 1024 / 1024 / 1024) > 45
+        for: 10m
+        labels:
+          severity: warning
+          service: database
+        annotations:
+          summary: "Database disk usage is high"
+          description: "Database size is {{ $value }}GB, approaching storage limits."
+
+      # Redis alerts
+      - alert: RedisDown
+        expr: up{job="redis"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: redis
+        annotations:
+          summary: "Redis is down"
+          description: "Redis has been down for more than 1 minute."
+
+      - alert: RedisHighMemoryUsage
+        expr: redis_memory_used_bytes / redis_memory_max_bytes > 0.9
+        for: 5m
+        labels:
+          severity: warning
+          service: redis
+        annotations:
+          summary: "High Redis memory usage"
+          description: "Redis memory usage is {{ $value | humanizePercentage }}, which is above 90%."
+
+      - alert: RedisHighConnections
+        expr: redis_connected_clients > 100
+        for: 5m
+        labels:
+          severity: warning
+          service: redis
+        annotations:
+          summary: "High number of Redis connections"
+          description: "Redis has {{ $value }} connected clients, which may indicate a connection leak."
+
+      # System resource alerts
+      - alert: HighCPUUsage
+        expr: 100 - (avg by(instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 85
+        for: 10m
+        labels:
+          severity: warning
+          service: system
+        annotations:
+          summary: "High CPU usage"
+          description: "CPU usage on {{ $labels.instance }} is {{ $value }}%, which is above 85%."
+
+      - alert: HighMemoryUsage
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) > 0.9
+        for: 5m
+        labels:
+          severity: warning
+          service: system
+        annotations:
+          summary: "High memory usage"
+          description: "Memory usage on {{ $labels.instance }} is {{ $value | humanizePercentage }}, which is above 90%."
+
+      - alert: HighDiskUsage
+        expr: (1 - (node_filesystem_avail_bytes / node_filesystem_size_bytes)) > 0.85
+        for: 10m
+        labels:
+          severity: warning
+          service: system
+        annotations:
+          summary: "High disk usage"
+          description: "Disk usage on {{ $labels.instance }} mount {{ $labels.mountpoint }} is {{ $value | humanizePercentage }}, which is above 85%."
+
+      - alert: HighLoadAverage
+        expr: node_load15 / count by(instance) (node_cpu_seconds_total{mode="idle"}) > 2
+        for: 15m
+        labels:
+          severity: warning
+          service: system
+        annotations:
+          summary: "High system load"
+          description: "15-minute load average on {{ $labels.instance }} is {{ $value }}, which is above 2.0."
+
+      # FDW-specific alerts
+      - alert: FDWConnectionFailure
+        expr: fdw_connection_errors_total > 0
+        for: 1m
+        labels:
+          severity: critical
+          service: fdw
+        annotations:
+          summary: "FDW connection failure"
+          description: "FDW connection to {{ $labels.server_name }} is failing with {{ $value }} errors."
+
+      - alert: FDWHighQueryTime
+        expr: histogram_quantile(0.95, rate(fdw_query_duration_seconds_bucket[5m])) > 30
+        for: 10m
+        labels:
+          severity: warning
+          service: fdw
+        annotations:
+          summary: "High FDW query time"
+          description: "95th percentile FDW query time is {{ $value }}s, which is above 30s."
+
+      - alert: FDWHighErrorRate
+        expr: rate(fdw_query_errors_total[5m]) / rate(fdw_queries_total[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          service: fdw
+        annotations:
+          summary: "High FDW error rate"
+          description: "FDW error rate is {{ $value | humanizePercentage }}, which is above 10%."
+
+      # Celery worker alerts
+      - alert: CeleryWorkersDown
+        expr: celery_workers_active == 0
+        for: 2m
+        labels:
+          severity: critical
+          service: celery
+        annotations:
+          summary: "No active Celery workers"
+          description: "All Celery workers are down or not responding."
+
+      - alert: CeleryHighQueueSize
+        expr: celery_queue_length > 100
+        for: 10m
+        labels:
+          severity: warning
+          service: celery
+        annotations:
+          summary: "High Celery queue size"
+          description: "Celery queue has {{ $value }} pending tasks, which may indicate processing delays."
+
+      - alert: CeleryTaskFailureRate
+        expr: rate(celery_task_failed_total[5m]) / rate(celery_task_total[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          service: celery
+        annotations:
+          summary: "High Celery task failure rate"
+          description: "Celery task failure rate is {{ $value | humanizePercentage }}, which is above 10%."
+
+      # Kubernetes alerts (for production)
+      - alert: PodCrashLooping
+        expr: rate(kube_pod_container_status_restarts_total[15m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+          service: kubernetes
+        annotations:
+          summary: "Pod is crash looping"
+          description: "Pod {{ $labels.namespace }}/{{ $labels.pod }} is crash looping."
+
+      - alert: PodNotReady
+        expr: kube_pod_status_ready{condition="false"} == 1
+        for: 10m
+        labels:
+          severity: warning
+          service: kubernetes
+        annotations:
+          summary: "Pod not ready"
+          description: "Pod {{ $labels.namespace }}/{{ $labels.pod }} has been not ready for more than 10 minutes."
+
+      - alert: DeploymentReplicasMismatch
+        expr: kube_deployment_spec_replicas != kube_deployment_status_available_replicas
+        for: 10m
+        labels:
+          severity: warning
+          service: kubernetes
+        annotations:
+          summary: "Deployment replicas mismatch"
+          description: "Deployment {{ $labels.namespace }}/{{ $labels.deployment }} has {{ $labels.spec_replicas }} desired replicas but only {{ $labels.available_replicas }} are available."
+
+      # SSL certificate expiration
+      - alert: SSLCertificateExpiring
+        expr: (ssl_cert_not_after - time()) / 86400 < 30
+        for: 1h
+        labels:
+          severity: warning
+          service: security
+        annotations:
+          summary: "SSL certificate expiring soon"
+          description: "SSL certificate for {{ $labels.instance }} expires in {{ $value }} days."
+
+      # Backup alerts
+      - alert: BackupFailed
+        expr: time() - backup_last_success_timestamp > 86400
+        for: 1h
+        labels:
+          severity: critical
+          service: backup
+        annotations:
+          summary: "Database backup failed"
+          description: "Database backup has not completed successfully for more than 24 hours."
+
+      # Data freshness alerts
+      - alert: DataFreshnessIssue
+        expr: time() - data_last_update_timestamp > 3600
+        for: 30m
+        labels:
+          severity: warning
+          service: data
+        annotations:
+          summary: "Data freshness issue"
+          description: "Data has not been updated for more than 1 hour in table {{ $labels.table_name }}."

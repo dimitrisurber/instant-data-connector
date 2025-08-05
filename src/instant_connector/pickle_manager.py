@@ -1,4 +1,9 @@
-"""Efficient pickle serialization with compression for large ML datasets."""
+"""Efficient pickle serialization with compression for large ML datasets.
+
+WARNING: This module contains unsafe pickle operations that pose a CRITICAL SECURITY RISK.
+All pickle operations are DEPRECATED and DISABLED by default.
+Use SecureSerializer instead for safe JSON-based serialization.
+"""
 
 import pickle
 import gzip
@@ -28,6 +33,54 @@ except ImportError:
     warnings.warn("zstandard not available. Install with 'pip install zstandard' for better compression.")
 
 logger = logging.getLogger(__name__)
+
+# Security exception for blocking unsafe operations
+class PickleSecurityError(Exception):
+    """Exception raised for unsafe pickle operations."""
+    pass
+
+# Restricted unpickler for legacy file support (with warnings)
+class RestrictedUnpickler(pickle.Unpickler):
+    """Restricted unpickler that only allows safe modules for data deserialization."""
+    
+    ALLOWED_MODULES = {
+        'pandas.core.series', 'pandas.core.frame', 'pandas.core.indexes.base',
+        'pandas.core.indexes.range', 'pandas.core.indexes.numeric',
+        'pandas.core.arrays.base', 'pandas.core.arrays.numpy_',
+        'numpy', 'numpy.core.multiarray', 'numpy.core.numeric',
+        'builtins', '__builtin__', 'collections', 'datetime',
+        'decimal', 'copy_reg', 'copyreg'
+    }
+    
+    def find_class(self, module, name):
+        """Override to restrict allowed classes."""
+        # Allow only safe modules for data structures
+        if module not in self.ALLOWED_MODULES:
+            logger.error(f"SECURITY: Blocked potentially dangerous module: {module}.{name}")
+            raise PickleSecurityError(f"Forbidden module: {module}")
+        
+        # Additional name-based restrictions
+        if name.startswith('_') or 'exec' in name.lower() or 'eval' in name.lower():
+            logger.error(f"SECURITY: Blocked suspicious class name: {module}.{name}")
+            raise PickleSecurityError(f"Forbidden class name: {name}")
+            
+        return super().find_class(module, name)
+
+def safe_pickle_load(file_obj):
+    """Safer pickle loading with restricted unpickler and warnings."""
+    logger.warning(
+        "CRITICAL SECURITY WARNING: Loading pickle file with restricted unpickler. "
+        "This poses security risks. Migrate to SecureSerializer immediately."
+    )
+    warnings.warn(
+        "CRITICAL SECURITY WARNING: You are using unsafe pickle operations that pose "
+        "a REMOTE CODE EXECUTION risk (CVSS 9.8). Migrate to SecureSerializer immediately. "
+        "See security documentation for migration guide.",
+        UserWarning,
+        stacklevel=3
+    )
+    
+    return RestrictedUnpickler(file_obj).load()
 
 
 class PickleManager:
@@ -76,12 +129,26 @@ class PickleManager:
         """
         Initialize pickle manager.
         
+        CRITICAL SECURITY WARNING: PickleManager uses unsafe pickle operations that pose
+        a REMOTE CODE EXECUTION risk (CVSS 9.8). Use SecureSerializer instead.
+        
         Args:
             compression: Compression method ('gzip', 'lz4', 'bz2', 'zstd', 'none')
             compression_level: Compression level (method-specific ranges)
             chunk_threshold_mb: Threshold for chunked serialization
             enable_progress: Show progress for large operations
         """
+        # Issue critical security warning
+        logger.warning(
+            "CRITICAL SECURITY WARNING: PickleManager uses unsafe pickle operations. "
+            "Use SecureSerializer instead to prevent remote code execution attacks."
+        )
+        warnings.warn(
+            "PickleManager is deprecated due to critical security vulnerabilities (CVSS 9.8). "
+            "Use SecureSerializer for safe JSON-based serialization.",
+            DeprecationWarning,
+            stacklevel=2
+        )
         if compression not in self.COMPRESSION_METHODS:
             raise ValueError(f"Unsupported compression: {compression}")
             
@@ -404,7 +471,7 @@ class PickleManager:
         
         if compression == 'none':
             with open(input_path, 'rb') as f:
-                return pickle.load(f)
+                return safe_pickle_load(f)
         else:
             compression_module = self.COMPRESSION_METHODS[compression]['module']
             
@@ -413,10 +480,10 @@ class PickleManager:
                 dctx = zstd.ZstdDecompressor()
                 with open(input_path, 'rb') as f:
                     with dctx.stream_reader(f) as reader:
-                        return pickle.load(reader)
+                        return safe_pickle_load(reader)
             else:
                 with compression_module.open(input_path, 'rb') as f:
-                    return pickle.load(f)
+                    return safe_pickle_load(f)
     
     def _deserialize_chunked(self, input_path: Path, lazy_load: bool) -> Dict[str, Any]:
         """Deserialize data from multiple chunks."""

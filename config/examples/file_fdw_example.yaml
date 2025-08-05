@@ -1,0 +1,276 @@
+# File FDW Configuration Example
+# This example demonstrates reading various file formats using file_fdw
+
+version: "1.0"
+
+metadata:
+  name: "File FDW Example"
+  description: "Example configuration for reading CSV and text files"
+  author: "Data Engineering Team"
+  created: "2024-01-01T00:00:00Z"
+  tags:
+    - "file"
+    - "csv"
+    - "data-files"
+
+global_settings:
+  connection_timeout: 30
+  query_timeout: 300
+  enable_push_down: false  # File FDW doesn't support push-down
+
+sources:
+  # Sales data files
+  sales_files:
+    type: file_fdw
+    description: "Sales data CSV files"
+    enabled: true
+    server_options: {}  # Empty for file_fdw
+    tables:
+      - name: daily_sales
+        description: "Daily sales data"
+        schema: public
+        options:
+          filename: "${DATA_DIR}/sales/daily_sales.csv"
+          format: csv
+          header: true
+          delimiter: ","
+          quote: '"'
+          escape: '"'
+          null: ""
+          encoding: "UTF8"
+        columns:
+          - name: sale_date
+            type: date
+            not_null: true
+            description: "Date of sale"
+          - name: store_id
+            type: varchar(10)
+            not_null: true
+            description: "Store identifier"
+          - name: product_id
+            type: varchar(20)
+            not_null: true
+            description: "Product SKU"
+          - name: product_name
+            type: varchar(200)
+            description: "Product name"
+          - name: category
+            type: varchar(50)
+            description: "Product category"
+          - name: quantity
+            type: integer
+            not_null: true
+            description: "Quantity sold"
+          - name: unit_price
+            type: decimal(10,2)
+            not_null: true
+            description: "Price per unit"
+          - name: total_amount
+            type: decimal(12,2)
+            not_null: true
+            description: "Total sale amount"
+          - name: customer_id
+            type: varchar(20)
+            description: "Customer identifier"
+          - name: sales_rep
+            type: varchar(100)
+            description: "Sales representative"
+
+      - name: monthly_summary
+        description: "Monthly sales summary"
+        options:
+          filename: "/data/reports/monthly_summary.csv"
+          format: csv
+          header: true
+          delimiter: ","
+        columns:
+          - name: year_month
+            type: varchar(7)
+            not_null: true
+            description: "YYYY-MM format"
+          - name: total_sales
+            type: decimal(15,2)
+            description: "Total sales amount"
+          - name: total_orders
+            type: integer
+            description: "Number of orders"
+          - name: unique_customers
+            type: integer
+            description: "Unique customer count"
+          - name: avg_order_value
+            type: decimal(10,2)
+            description: "Average order value"
+
+  # Customer data files
+  customer_files:
+    type: file_fdw
+    description: "Customer data files"
+    enabled: true
+    server_options: {}
+    tables:
+      - name: customer_demographics
+        description: "Customer demographic data"
+        options:
+          filename: "${CUSTOMER_DATA_DIR}/demographics.csv"
+          format: csv
+          header: true
+          delimiter: "|"  # Pipe-delimited file
+          quote: '"'
+        columns:
+          - name: customer_id
+            type: varchar(20)
+            not_null: true
+          - name: age_group
+            type: varchar(20)
+          - name: gender
+            type: varchar(10)
+          - name: income_bracket
+            type: varchar(30)
+          - name: education_level
+            type: varchar(50)
+          - name: marital_status
+            type: varchar(20)
+          - name: geography
+            type: varchar(100)
+          - name: signup_channel
+            type: varchar(50)
+
+      - name: customer_preferences
+        description: "Customer preference data"
+        options:
+          filename: "/data/customers/preferences.tsv"
+          format: csv
+          header: true
+          delimiter: "\t"  # Tab-delimited file
+        columns:
+          - name: customer_id
+            type: varchar(20)
+            not_null: true
+          - name: preferred_category
+            type: varchar(50)
+          - name: communication_preference
+            type: varchar(30)
+          - name: discount_sensitivity
+            type: varchar(20)
+          - name: brand_loyalty_score
+            type: decimal(3,2)
+          - name: last_updated
+            type: date
+
+  # Log files
+  log_files:
+    type: file_fdw
+    description: "Application log files"
+    enabled: true
+    server_options: {}
+    tables:
+      - name: access_logs
+        description: "Web server access logs"
+        options:
+          filename: "${LOG_DIR}/access.log"
+          format: csv
+          header: false  # Log files typically don't have headers
+          delimiter: " "
+          quote: ""  # No quoting in log files
+        columns:
+          - name: ip_address
+            type: inet
+            description: "Client IP address"
+          - name: timestamp
+            type: text  # Will need parsing
+            description: "Request timestamp"
+          - name: method
+            type: varchar(10)
+            description: "HTTP method"
+          - name: url
+            type: text
+            description: "Requested URL"
+          - name: status_code
+            type: integer
+            description: "HTTP status code"
+          - name: response_size
+            type: bigint
+            description: "Response size in bytes"
+          - name: user_agent
+            type: text
+            description: "User agent string"
+
+  # Configuration files
+  config_files:
+    type: file_fdw
+    description: "Configuration and reference data"
+    enabled: true
+    server_options: {}
+    tables:
+      - name: product_catalog
+        description: "Product catalog reference data"
+        options:
+          filename: "/config/products.csv"
+          format: csv
+          header: true
+          delimiter: ","
+          encoding: "UTF8"
+        columns:
+          - name: product_id
+            type: varchar(20)
+            not_null: true
+          - name: product_name
+            type: varchar(200)
+            not_null: true
+          - name: category
+            type: varchar(50)
+          - name: subcategory
+            type: varchar(50)
+          - name: brand
+            type: varchar(100)
+          - name: list_price
+            type: decimal(10,2)
+          - name: cost
+            type: decimal(10,2)
+          - name: weight
+            type: decimal(8,3)
+          - name: dimensions
+            type: varchar(50)
+          - name: color
+            type: varchar(30)
+          - name: size
+            type: varchar(20)
+          - name: is_active
+            type: boolean
+          - name: created_date
+            type: date
+          - name: last_modified
+            type: timestamptz
+
+      - name: store_locations
+        description: "Store location reference data"
+        options:
+          filename: "/config/stores.csv"
+          format: csv
+          header: true
+        columns:
+          - name: store_id
+            type: varchar(10)
+            not_null: true
+          - name: store_name
+            type: varchar(100)
+          - name: address
+            type: text
+          - name: city
+            type: varchar(50)
+          - name: state
+            type: varchar(30)
+          - name: zip_code
+            type: varchar(10)
+          - name: country
+            type: varchar(50)
+          - name: phone
+            type: varchar(20)
+          - name: manager
+            type: varchar(100)
+          - name: opening_date
+            type: date
+          - name: store_type
+            type: varchar(30)
+          - name: square_footage
+            type: integer

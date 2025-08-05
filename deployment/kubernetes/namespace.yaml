@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: instant-connector
+  labels:
+    name: instant-connector
+    environment: production
+    version: v1
+  annotations:
+    description: "PostgreSQL FDW-based data connector system"

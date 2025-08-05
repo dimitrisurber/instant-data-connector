@@ -1,0 +1,542 @@
+# Mixed Sources Configuration Example
+# This example demonstrates combining multiple FDW types in a single configuration
+
+version: "1.0"
+
+metadata:
+  name: "Mixed Sources Example"
+  description: "Example configuration combining PostgreSQL, MySQL, file, and Multicorn FDWs"
+  author: "Data Engineering Team"
+  created: "2024-01-01T00:00:00Z"
+  tags:
+    - "mixed-sources"
+    - "multi-fdw"
+    - "comprehensive"
+    - "production"
+
+global_settings:
+  connection_timeout: 45
+  query_timeout: 900
+  retry_attempts: 3
+  enable_push_down: true
+
+sources:
+  # Primary PostgreSQL data warehouse
+  main_warehouse:
+    type: postgres_fdw
+    description: "Main PostgreSQL data warehouse"
+    enabled: true
+    server_options:
+      host: "${WAREHOUSE_DB_HOST}"
+      port: "5432"
+      dbname: "warehouse"
+      use_remote_estimate: true
+      fdw_startup_cost: 100.0
+      fdw_tuple_cost: 0.1
+    user_mapping:
+      user: current_user
+      options:
+        user: "${WAREHOUSE_DB_USER}"
+        password: "${WAREHOUSE_DB_PASSWORD}"
+    tables:
+      - name: dim_customers
+        description: "Customer dimension table"
+        schema: public
+        options:
+          table_name: "dim_customers"
+          schema_name: "dimensions"
+          use_remote_estimate: true
+          fetch_size: 1000
+        columns:
+          - name: customer_key
+            type: integer
+            not_null: true
+            description: "Surrogate key"
+          - name: customer_id
+            type: integer
+            not_null: true
+            description: "Business key"
+          - name: customer_name
+            type: varchar(255)
+            not_null: true
+          - name: email
+            type: varchar(255)
+          - name: registration_date
+            type: date
+          - name: customer_segment
+            type: varchar(50)
+          - name: lifetime_value
+            type: decimal(12,2)
+          - name: effective_date
+            type: date
+            not_null: true
+          - name: expiry_date
+            type: date
+
+      - name: fact_sales
+        description: "Sales fact table"
+        options:
+          table_name: "fact_sales"
+          schema_name: "facts"
+          fetch_size: 5000
+        columns:
+          - name: sale_key
+            type: bigint
+            not_null: true
+          - name: customer_key
+            type: integer
+            not_null: true
+          - name: product_key
+            type: integer
+            not_null: true
+          - name: date_key
+            type: integer
+            not_null: true
+          - name: quantity
+            type: integer
+            not_null: true
+          - name: unit_price
+            type: decimal(10,2)
+            not_null: true
+          - name: total_amount
+            type: decimal(12,2)
+            not_null: true
+          - name: discount_amount
+            type: decimal(10,2)
+          - name: tax_amount
+            type: decimal(10,2)
+
+  # Operational MySQL database
+  operational_mysql:
+    type: mysql_fdw
+    description: "Operational MySQL database for real-time data"
+    enabled: true
+    server_options:
+      host: "${MYSQL_HOST}"
+      port: "3306"
+      secure_auth: true
+      use_remote_estimate: true
+      reconnect: true
+    user_mapping:
+      user: current_user
+      options:
+        username: "${MYSQL_USER}"
+        password: "${MYSQL_PASSWORD}"
+    tables:
+      - name: current_inventory
+        description: "Real-time inventory levels"
+        schema: public
+        options:
+          dbname: "operations"
+          table_name: "inventory"
+        columns:
+          - name: product_id
+            type: integer
+            not_null: true
+          - name: warehouse_id
+            type: integer
+            not_null: true
+          - name: quantity_on_hand
+            type: integer
+            not_null: true
+          - name: quantity_reserved
+            type: integer
+            default: "0"
+          - name: last_updated
+            type: timestamp
+            not_null: true
+          - name: reorder_point
+            type: integer
+          - name: max_stock_level
+            type: integer
+
+      - name: active_orders
+        description: "Currently active orders"
+        options:
+          dbname: "operations"
+          table_name: "orders"
+        columns:
+          - name: order_id
+            type: bigint
+            not_null: true
+          - name: customer_id
+            type: integer
+            not_null: true
+          - name: order_status
+            type: varchar(20)
+            not_null: true
+          - name: order_date
+            type: timestamp
+            not_null: true
+          - name: total_amount
+            type: decimal(12,2)
+            not_null: true
+          - name: payment_status
+            type: varchar(20)
+          - name: shipping_method
+            type: varchar(50)
+          - name: estimated_delivery
+            type: date
+
+  # External data files
+  external_files:
+    type: file_fdw
+    description: "External data files and feeds"
+    enabled: true
+    server_options: {}
+    tables:
+      - name: market_data
+        description: "Daily market data feed"
+        schema: public
+        options:
+          filename: "${DATA_FEEDS_DIR}/market_data.csv"
+          format: csv
+          header: true
+          delimiter: ","
+          encoding: "UTF8"
+        columns:
+          - name: date
+            type: date
+            not_null: true
+          - name: symbol
+            type: varchar(10)
+            not_null: true
+          - name: open_price
+            type: decimal(10,4)
+          - name: high_price
+            type: decimal(10,4)
+          - name: low_price
+            type: decimal(10,4)
+          - name: close_price
+            type: decimal(10,4)
+            not_null: true
+          - name: volume
+            type: bigint
+          - name: adj_close
+            type: decimal(10,4)
+
+      - name: supplier_catalog
+        description: "Supplier product catalog"
+        options:
+          filename: "${SUPPLIER_DATA_DIR}/catalog.csv"
+          format: csv
+          header: true
+          delimiter: "|"
+        columns:
+          - name: supplier_id
+            type: varchar(20)
+            not_null: true
+          - name: supplier_product_id
+            type: varchar(50)
+            not_null: true
+          - name: product_name
+            type: varchar(255)
+            not_null: true
+          - name: category
+            type: varchar(100)
+          - name: unit_cost
+            type: decimal(10,2)
+            not_null: true
+          - name: minimum_order_qty
+            type: integer
+          - name: lead_time_days
+            type: integer
+          - name: last_updated
+            type: date
+
+      - name: web_analytics
+        description: "Web analytics export data"
+        options:
+          filename: "/data/analytics/web_traffic.tsv"
+          format: csv
+          header: true
+          delimiter: "\t"
+        columns:
+          - name: date
+            type: date
+            not_null: true
+          - name: page_path
+            type: text
+            not_null: true
+          - name: page_views
+            type: integer
+            not_null: true
+          - name: unique_visitors
+            type: integer
+          - name: bounce_rate
+            type: decimal(5,4)
+          - name: avg_session_duration
+            type: integer
+          - name: conversion_rate
+            type: decimal(5,4)
+          - name: revenue
+            type: decimal(12,2)
+
+  # API integrations via Multicorn
+  api_integrations:
+    type: multicorn
+    description: "External API integrations"
+    enabled: true
+    server_options:
+      wrapper: "multicorn.restfdw.RestFDW"
+    user_mapping:
+      user: current_user
+      options:
+        request_handler: "multicorn.restfdw.RequestHandler"
+    tables:
+      - name: weather_data
+        description: "Weather data from external API"
+        schema: public
+        options:
+          base_url: "${WEATHER_API_URL}/current"
+          format: "json"
+          auth_type: "api_key"
+          auth_header: "X-API-Key"
+          auth_token: "${WEATHER_API_KEY}"
+          method: "GET"
+          cache_duration: 1800  # 30 minutes
+        columns:
+          - name: location_id
+            type: varchar(50)
+            not_null: true
+          - name: location_name
+            type: varchar(100)
+            not_null: true
+          - name: temperature
+            type: decimal(5,2)
+          - name: humidity
+            type: integer
+          - name: wind_speed
+            type: decimal(5,2)
+          - name: conditions
+            type: varchar(100)
+          - name: timestamp
+            type: timestamptz
+            not_null: true
+
+      - name: exchange_rates
+        description: "Currency exchange rates"
+        options:
+          base_url: "${EXCHANGE_API_URL}/latest"
+          format: "json"
+          auth_type: "bearer"
+          auth_token: "${EXCHANGE_API_TOKEN}"
+          method: "GET"
+          cache_duration: 3600  # 1 hour
+        columns:
+          - name: base_currency
+            type: varchar(3)
+            not_null: true
+          - name: target_currency
+            type: varchar(3)
+            not_null: true
+          - name: rate
+            type: decimal(10,6)
+            not_null: true
+          - name: last_updated
+            type: timestamptz
+            not_null: true
+
+  # Legacy system integration
+  legacy_system:
+    type: multicorn
+    description: "Legacy mainframe system integration"
+    enabled: true
+    server_options:
+      wrapper: "data_connectors.mainframe_fdw.MainframeFdw"
+      host: "${MAINFRAME_HOST}"
+      port: "${MAINFRAME_PORT}"
+      system_type: "AS400"
+    user_mapping:
+      options:
+        username: "${MAINFRAME_USER}"
+        password: "credential:mainframe_system"
+    tables:
+      - name: legacy_customers
+        description: "Customer master data from mainframe"
+        schema: legacy
+        options:
+          library: "CUSTLIB"
+          file: "CUSTMAST"
+          member: "*ALL"
+        columns:
+          - name: customer_number
+            type: varchar(20)
+            not_null: true
+          - name: customer_name
+            type: varchar(100)
+            not_null: true
+          - name: address_line1
+            type: varchar(50)
+          - name: address_line2
+            type: varchar(50)
+          - name: city
+            type: varchar(30)
+          - name: state
+            type: varchar(10)
+          - name: postal_code
+            type: varchar(20)
+          - name: phone_number
+            type: varchar(20)
+          - name: credit_limit
+            type: decimal(12,2)
+          - name: current_balance
+            type: decimal(12,2)
+          - name: last_payment_date
+            type: date
+          - name: status_code
+            type: varchar(2)
+
+  # MongoDB via custom Multicorn wrapper
+  document_store:
+    type: multicorn
+    description: "MongoDB document store"
+    enabled: true
+    server_options:
+      wrapper: "data_connectors.mongodb_fdw.MongoDBFdw"
+      connection_string: "${MONGODB_URI}"
+      database: "analytics"
+    user_mapping:
+      options:
+        username: "${MONGODB_USER}"
+        password: "${MONGODB_PASSWORD}"
+    tables:
+      - name: user_events
+        description: "User event tracking data"
+        schema: events
+        options:
+          collection: "user_events"
+          query_filter: '{"timestamp": {"$gte": new Date(Date.now() - 30*24*60*60*1000)}}'  # Last 30 days
+        columns:
+          - name: event_id
+            type: varchar(24)
+            not_null: true
+            description: "MongoDB ObjectId"
+          - name: user_id
+            type: integer
+            not_null: true
+          - name: event_type
+            type: varchar(50)
+            not_null: true
+          - name: event_data
+            type: jsonb
+            description: "Event payload as JSON"
+          - name: timestamp
+            type: timestamptz
+            not_null: true
+          - name: session_id
+            type: varchar(255)
+          - name: ip_address
+            type: inet
+          - name: user_agent
+            type: text
+
+      - name: product_reviews
+        description: "Customer product reviews"
+        options:
+          collection: "reviews"
+          query_filter: '{"status": "approved"}'
+        columns:
+          - name: review_id
+            type: varchar(24)
+            not_null: true
+          - name: product_id
+            type: integer
+            not_null: true
+          - name: customer_id
+            type: integer
+            not_null: true
+          - name: rating
+            type: integer
+            not_null: true
+          - name: review_title
+            type: varchar(255)
+          - name: review_text
+            type: text
+          - name: review_date
+            type: timestamptz
+            not_null: true
+          - name: helpful_votes
+            type: integer
+            default: "0"
+          - name: verified_purchase
+            type: boolean
+            default: "false"
+
+  # Data lake integration
+  data_lake:
+    type: file_fdw
+    description: "Data lake parquet files"
+    enabled: true
+    server_options: {}
+    tables:
+      - name: clickstream_data
+        description: "Web clickstream data"
+        schema: datalake
+        options:
+          filename: "${DATA_LAKE_PATH}/clickstream/year=2024/month=*/day=*/clickstream.parquet"
+          format: csv  # Note: This would need custom parquet support
+          header: false
+        columns:
+          - name: timestamp
+            type: timestamptz
+            not_null: true
+          - name: user_id
+            type: varchar(255)
+          - name: session_id
+            type: varchar(255)
+            not_null: true
+          - name: page_url
+            type: text
+            not_null: true
+          - name: referrer_url
+            type: text
+          - name: user_agent
+            type: text
+          - name: ip_address
+            type: inet
+          - name: country_code
+            type: varchar(2)
+          - name: device_type
+            type: varchar(20)
+          - name: browser
+            type: varchar(50)
+          - name: os
+            type: varchar(50)
+
+# Example queries that demonstrate cross-source joins:
+# 
+# -- Join warehouse dimensions with operational data
+# SELECT 
+#   dc.customer_name,
+#   dc.customer_segment,
+#   ao.order_id,
+#   ao.total_amount,
+#   ao.order_status
+# FROM dim_customers dc
+# JOIN active_orders ao ON dc.customer_id = ao.customer_id
+# WHERE ao.order_status = 'processing';
+#
+# -- Combine sales data with market conditions
+# SELECT 
+#   fs.date_key,
+#   SUM(fs.total_amount) as daily_sales,
+#   md.close_price as market_price,
+#   wd.temperature,
+#   wd.conditions
+# FROM fact_sales fs
+# JOIN market_data md ON fs.date_key::date = md.date
+# LEFT JOIN weather_data wd ON fs.date_key::date = wd.timestamp::date
+# GROUP BY fs.date_key, md.close_price, wd.temperature, wd.conditions;
+#
+# -- Monitor inventory against supplier lead times
+# SELECT 
+#   ci.product_id,
+#   ci.quantity_on_hand,
+#   ci.reorder_point,
+#   sc.supplier_id,
+#   sc.lead_time_days,
+#   sc.minimum_order_qty
+# FROM current_inventory ci
+# LEFT JOIN supplier_catalog sc ON ci.product_id = sc.supplier_product_id::integer
+# WHERE ci.quantity_on_hand <= ci.reorder_point;

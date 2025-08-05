@@ -1,0 +1,50 @@
+# Grafana datasource configuration for Prometheus
+apiVersion: 1
+
+datasources:
+  # Main Prometheus datasource
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: true
+    jsonData:
+      timeInterval: "30s"
+      queryTimeout: "60s"
+      httpMethod: "GET"
+      manageAlerts: true
+      alertmanagerUid: alertmanager
+    version: 1
+
+  # PostgreSQL datasource for direct queries
+  - name: PostgreSQL
+    type: postgres
+    access: proxy
+    url: postgres-fdw:5432
+    database: instant_connector
+    user: connector_user
+    secureJsonData:
+      password: "${POSTGRES_PASSWORD}"
+    jsonData:
+      sslmode: "prefer"
+      maxOpenConns: 10
+      maxIdleConns: 2
+      connMaxLifetime: 14400
+      postgresVersion: 1500
+      timescaledb: false
+    version: 1
+
+  # Redis datasource for direct queries (if plugin available)
+  - name: Redis
+    type: redis-datasource
+    access: proxy
+    url: redis:6379
+    jsonData:
+      client: "standalone"
+      poolSize: 5
+      timeout: 10
+      pingInterval: 0
+    secureJsonData:
+      password: "${REDIS_PASSWORD}"
+    version: 1

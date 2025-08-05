@@ -82,9 +82,7 @@ class TestInstantDataConnector:
     def test_init(self, aggregator):
         """Test initialization."""
         assert aggregator.raw_data == {}
-        assert aggregator.ml_ready_data == {}
         assert aggregator.metadata == {}
-        assert aggregator.ml_artifacts == {}
     
     @patch('instant_connector.aggregator.DatabaseSource')
     def test_add_database_source(self, mock_db_class, aggregator):
@@ -247,65 +245,13 @@ class TestInstantDataConnector:
         assert aggregator.metadata['total_sources'] == 2
         assert aggregator.metadata['total_tables'] == 2
     
-    def test_apply_ml_optimization(self, aggregator, sample_dataframes):
-        """Test ML optimization application."""
-        aggregator.raw_data = sample_dataframes
-        
-        # Configure ML optimizer
-        aggregator.configure_ml_optimization(
-            handle_missing='mean',
-            encode_categorical='label',
-            scale_numeric='standard'
-        )
-        
-        aggregator.apply_ml_optimization(target_column=None)
-        
-        assert len(aggregator.ml_ready_data) > 0
-        assert 'preprocessing_metadata' in aggregator.ml_artifacts
     
-    def test_apply_ml_optimization_with_target(self, aggregator):
-        """Test ML optimization with target column."""
-        # Create data with target
-        df = pd.DataFrame({
-            'feature1': [1, 2, 3, 4, 5],
-            'feature2': ['A', 'B', 'A', 'B', 'A'],
-            'target': [0, 1, 0, 1, 0]
-        })
-        aggregator.raw_data = {'data': df}
-        
-        aggregator.apply_ml_optimization(
-            target_column='target',
-            test_size=0.4,
-            stratify=True
-        )
-        
-        assert 'X_train' in aggregator.ml_ready_data
-        assert 'X_test' in aggregator.ml_ready_data
-        assert 'y_train' in aggregator.ml_ready_data
-        assert 'y_test' in aggregator.ml_ready_data
     
-    def test_configure_ml_optimization(self, aggregator):
-        """Test ML optimization configuration."""
-        aggregator.configure_ml_optimization(
-            handle_missing='drop',
-            encode_categorical='onehot',
-            scale_numeric='minmax',
-            feature_engineering=True,
-            reduce_memory=True
-        )
-        
-        assert aggregator.ml_optimizer.handle_missing == 'drop'
-        assert aggregator.ml_optimizer.encode_categorical == 'onehot'
-        assert aggregator.ml_optimizer.scale_numeric == 'minmax'
-        assert aggregator.ml_optimizer.feature_engineering is True
-        assert aggregator.ml_optimizer.reduce_memory is True
     
     def test_save_pickle(self, aggregator, sample_dataframes):
         """Test saving to pickle."""
         aggregator.raw_data = sample_dataframes
-        aggregator.ml_ready_data = {'processed': sample_dataframes['users']}
         aggregator.metadata = {'test': True}
-        aggregator.ml_artifacts = {'scaler': 'test'}
         
         with tempfile.TemporaryDirectory() as temp_dir:
             output_path = Path(temp_dir) / 'test_output.pkl'
@@ -342,9 +288,6 @@ class TestInstantDataConnector:
             assert 'test_csv' in aggregator.sources
             assert 'test_api' in aggregator.sources
             
-            # Check ML optimizer configured
-            assert aggregator.ml_optimizer is not None
-            assert aggregator.ml_optimizer.handle_missing == 'mean'
     
     def test_load_from_config_file(self, aggregator, sample_config):
         """Test loading configuration from file."""
@@ -366,14 +309,12 @@ class TestInstantDataConnector:
     def test_get_summary(self, aggregator, sample_dataframes):
         """Test getting summary."""
         aggregator.raw_data = sample_dataframes
-        aggregator.ml_ready_data = {'processed': sample_dataframes['users']}
         aggregator.metadata = {'total_sources': 2}
         
         summary = aggregator.get_summary()
         
         assert summary['total_sources'] == 2
-        assert summary['total_raw_tables'] == 3
-        assert summary['total_ml_ready_tables'] == 1
+        assert summary['total_tables'] == 3
         assert summary['total_rows'] > 0
         assert summary['memory_usage_mb'] > 0
     
@@ -454,20 +395,14 @@ class TestInstantDataConnector:
                     'name': 'test_data',
                     'path': 'test.csv'
                 }],
-                'ml_optimization': {
-                    'enabled': True,
-                    'encode_categorical': 'onehot'
-                }
             }
             
             # Run workflow
             aggregator.load_from_config(config)
             aggregator.aggregate_all()
-            aggregator.apply_ml_optimization()
             
             # Check results
             assert 'test_data' in aggregator.raw_data
-            assert len(aggregator.ml_ready_data) > 0
             
             # Save
             with tempfile.TemporaryDirectory() as temp_dir:

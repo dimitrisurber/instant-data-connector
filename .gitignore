@@ -234,12 +234,31 @@ Thumbs.db
 *.db-wal
 *.db-shm
 
-# API keys and credentials
+# API keys and credentials (SECURITY CRITICAL)
+.env
+.env.*
 .env.local
 .env.production
 .env.staging
+.env.development
+.env.test
 credentials.json
+credentials.yaml
+credentials.yml
 api_keys.txt
+secrets.json
+secrets.yaml
+secrets.yml
+.secrets
+.credentials
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+*.jks
+keystore.*
+truststore.*
 
 # ML model files
 *.model

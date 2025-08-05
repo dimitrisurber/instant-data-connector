@@ -1,0 +1,342 @@
+# MySQL FDW Configuration Example
+# This example demonstrates connecting to MySQL databases
+
+version: "1.0"
+
+metadata:
+  name: "MySQL FDW Example"
+  description: "Example configuration for connecting to MySQL databases"
+  author: "Data Engineering Team"
+  created: "2024-01-01T00:00:00Z"
+  tags:
+    - "mysql"
+    - "remote-database"
+    - "ecommerce"
+
+global_settings:
+  connection_timeout: 30
+  query_timeout: 300
+  retry_attempts: 2
+  enable_push_down: true
+
+sources:
+  # E-commerce MySQL Database
+  ecommerce_mysql:
+    type: mysql_fdw
+    description: "E-commerce MySQL database"
+    enabled: true
+    server_options:
+      host: "${MYSQL_HOST}"
+      port: "3306"
+      secure_auth: true
+      use_remote_estimate: true
+      reconnect: true
+      sql_mode: "TRADITIONAL"
+    user_mapping:
+      user: current_user
+      options:
+        username: "${MYSQL_USER}"
+        password: "${MYSQL_PASSWORD}"
+    tables:
+      - name: products
+        description: "Product catalog from MySQL"
+        schema: public
+        options:
+          dbname: "ecommerce"
+          table_name: "products"
+        columns:
+          - name: id
+            type: integer
+            not_null: true
+            description: "Product ID"
+          - name: sku
+            type: varchar(50)
+            not_null: true
+            description: "Stock keeping unit"
+          - name: name
+            type: varchar(255)
+            not_null: true
+            description: "Product name"
+          - name: description
+            type: text
+            description: "Product description"
+          - name: category_id
+            type: integer
+            description: "Category ID"
+          - name: price
+            type: decimal(10,2)
+            not_null: true
+            description: "Product price"
+          - name: cost
+            type: decimal(10,2)
+            description: "Product cost"
+          - name: weight
+            type: decimal(8,3)
+            description: "Product weight"
+          - name: stock_quantity
+            type: integer
+            default: "0"
+            description: "Available stock"
+          - name: is_active
+            type: boolean
+            default: "true"
+          - name: created_at
+            type: timestamp
+            description: "Creation timestamp"
+          - name: updated_at
+            type: timestamp
+            description: "Last update timestamp"
+
+      - name: categories
+        description: "Product categories"
+        options:
+          dbname: "ecommerce"
+          table_name: "categories"
+        columns:
+          - name: id
+            type: integer
+            not_null: true
+          - name: name
+            type: varchar(100)
+            not_null: true
+          - name: slug
+            type: varchar(100)
+            not_null: true
+          - name: parent_id
+            type: integer
+            description: "Parent category ID"
+          - name: description
+            type: text
+          - name: is_active
+            type: boolean
+            default: "true"
+          - name: sort_order
+            type: integer
+            default: "0"
+
+      - name: orders
+        description: "Customer orders"
+        options:
+          dbname: "ecommerce"
+          table_name: "orders"
+        columns:
+          - name: id
+            type: bigint
+            not_null: true
+          - name: customer_id
+            type: integer
+            not_null: true
+          - name: order_number
+            type: varchar(50)
+            not_null: true
+          - name: status
+            type: varchar(20)
+            not_null: true
+          - name: subtotal
+            type: decimal(12,2)
+            not_null: true
+          - name: tax_amount
+            type: decimal(10,2)
+          - name: shipping_amount
+            type: decimal(10,2)
+          - name: total_amount
+            type: decimal(12,2)
+            not_null: true
+          - name: currency
+            type: varchar(3)
+            default: "'USD'"
+          - name: payment_status
+            type: varchar(20)
+          - name: shipping_address
+            type: text
+          - name: billing_address
+            type: text
+          - name: order_date
+            type: timestamp
+            not_null: true
+          - name: shipped_date
+            type: timestamp
+          - name: delivered_date
+            type: timestamp
+
+      - name: order_items
+        description: "Order line items"
+        options:
+          dbname: "ecommerce"
+          table_name: "order_items"
+        columns:
+          - name: id
+            type: bigint
+            not_null: true
+          - name: order_id
+            type: bigint
+            not_null: true
+          - name: product_id
+            type: integer
+            not_null: true
+          - name: quantity
+            type: integer
+            not_null: true
+          - name: unit_price
+            type: decimal(10,2)
+            not_null: true
+          - name: total_price
+            type: decimal(12,2)
+            not_null: true
+          - name: discount_amount
+            type: decimal(10,2)
+            default: "0.00"
+
+  # Legacy MySQL System
+  legacy_system:
+    type: mysql_fdw
+    description: "Legacy MySQL system"
+    enabled: true
+    server_options:
+      host: "${LEGACY_MYSQL_HOST}"
+      port: "${LEGACY_MYSQL_PORT:3306}"
+      secure_auth: false  # Older MySQL version
+      use_remote_estimate: false
+      reconnect: true
+    user_mapping:
+      options:
+        username: "legacy_user"
+        password: "credential:legacy_mysql"
+    tables:
+      - name: customers_legacy
+        description: "Legacy customer data"
+        options:
+          dbname: "legacy_db"
+          table_name: "customers"
+        columns:
+          - name: customer_id
+            type: integer
+            not_null: true
+          - name: first_name
+            type: varchar(50)
+          - name: last_name
+            type: varchar(50)
+          - name: email
+            type: varchar(100)
+          - name: phone
+            type: varchar(20)
+          - name: address_line1
+            type: varchar(100)
+          - name: address_line2
+            type: varchar(100)
+          - name: city
+            type: varchar(50)
+          - name: state
+            type: varchar(30)
+          - name: zip_code
+            type: varchar(10)
+          - name: country
+            type: varchar(50)
+          - name: date_created
+            type: date
+          - name: last_purchase_date
+            type: date
+          - name: total_purchases
+            type: decimal(12,2)
+          - name: is_active
+            type: boolean
+
+      - name: inventory_legacy
+        description: "Legacy inventory data"
+        options:
+          dbname: "legacy_db"
+          table_name: "inventory"
+          max_blob_size: 1048576  # 1MB for large text fields
+        columns:
+          - name: product_id
+            type: integer
+            not_null: true
+          - name: warehouse_id
+            type: integer
+            not_null: true
+          - name: quantity_on_hand
+            type: integer
+            not_null: true
+          - name: quantity_reserved
+            type: integer
+            default: "0"
+          - name: reorder_point
+            type: integer
+            default: "0"
+          - name: max_stock_level
+            type: integer
+          - name: last_count_date
+            type: date
+          - name: notes
+            type: text
+            description: "Inventory notes (can be large)"
+
+  # MySQL Analytics Database
+  mysql_analytics:
+    type: mysql_fdw
+    description: "MySQL analytics and reporting database"
+    enabled: true
+    server_options:
+      host: "${ANALYTICS_MYSQL_HOST}"
+      port: "3306"
+      secure_auth: true
+      use_remote_estimate: true
+    user_mapping:
+      options:
+        username: "${ANALYTICS_MYSQL_USER}"
+        password: "${ANALYTICS_MYSQL_PASSWORD}"
+    tables:
+      - name: sales_metrics
+        description: "Pre-calculated sales metrics"
+        options:
+          dbname: "analytics"
+          table_name: "daily_sales_metrics"
+        columns:
+          - name: metric_date
+            type: date
+            not_null: true
+          - name: total_sales
+            type: decimal(15,2)
+          - name: order_count
+            type: integer
+          - name: unique_customers
+            type: integer
+          - name: avg_order_value
+            type: decimal(10,2)
+          - name: returning_customers
+            type: integer
+          - name: new_customers
+            type: integer
+          - name: top_category
+            type: varchar(100)
+          - name: top_product
+            type: varchar(255)
+          - name: created_at
+            type: timestamp
+
+      - name: customer_segments
+        description: "Customer segmentation data"
+        options:
+          dbname: "analytics"
+          table_name: "customer_segments"
+        columns:
+          - name: customer_id
+            type: integer
+            not_null: true
+          - name: segment_name
+            type: varchar(50)
+            not_null: true
+          - name: segment_score
+            type: decimal(5,2)
+          - name: lifetime_value
+            type: decimal(12,2)
+          - name: acquisition_cost
+            type: decimal(10,2)
+          - name: churn_risk
+            type: varchar(20)
+          - name: preferred_channel
+            type: varchar(30)
+          - name: last_analysis_date
+            type: date
+          - name: segment_notes
+            type: text

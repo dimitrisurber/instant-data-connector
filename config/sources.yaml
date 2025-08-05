@@ -7,11 +7,11 @@ sources:
     type: database
     connection:
       db_type: postgresql
-      host: localhost
-      port: 5432
-      database: sales
-      username: user
-      password: password
+      host: ${SALES_DB_HOST:-localhost}
+      port: ${SALES_DB_PORT:-5432}
+      database: ${SALES_DB_NAME:-sales}
+      username: ${SALES_DB_USER:-user}
+      password: ${SALES_DB_PASSWORD}  # REQUIRED - Set environment variable
     queries:
       customers: |
         SELECT customer_id, name, email, created_at, country

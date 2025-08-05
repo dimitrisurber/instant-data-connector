@@ -9,7 +9,9 @@ from pprint import pprint
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
 
-from instant_connector.pickle_manager import load_data_connector
+# Use secure serialization instead of unsafe pickle
+from instant_connector import load_data_connector  # Secure version
+# from instant_connector.pickle_manager import load_data_connector  # UNSAFE - DEPRECATED
 
 
 def main():
@@ -106,7 +108,9 @@ def main():
                     print(df.describe())
         
         print("\n💡 To use this data in your code:")
-        print(f"   from instant_connector.pickle_manager import load_data_connector")
+        print(f"   # Use secure serialization instead of unsafe pickle
+from instant_connector import load_data_connector  # Secure version
+# from instant_connector.pickle_manager import load_data_connector  # UNSAFE - DEPRECATED")
         print(f"   data = load_data_connector('{args.pickle_file}')")
         print(f"   df = data['{list(data.keys())[0]}']  # Get first dataset")
         

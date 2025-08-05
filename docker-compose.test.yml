@@ -1,0 +1,242 @@
+version: '3.8'
+
+services:
+  # PostgreSQL database with FDW extensions for testing
+  postgres_test:
+    image: postgres:15-alpine
+    container_name: fdw_test_postgres
+    environment:
+      POSTGRES_DB: test_fdw_db
+      POSTGRES_USER: test_user
+      POSTGRES_PASSWORD: test_password
+      POSTGRES_HOST_AUTH_METHOD: trust
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_test_data:/var/lib/postgresql/data
+      - ./tests/fixtures/sql:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U test_user -d test_fdw_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - test_network
+
+  # MySQL database for FDW testing
+  mysql_test:
+    image: mysql:8.0
+    container_name: fdw_test_mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: root_password
+      MYSQL_DATABASE: test_mysql_db
+      MYSQL_USER: test_user
+      MYSQL_PASSWORD: test_password
+    ports:
+      - "3307:3306"
+    volumes:
+      - mysql_test_data:/var/lib/mysql
+      - ./tests/fixtures/sql/mysql_init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "test_user", "-ptest_password"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - test_network
+
+  # Mock REST API server for testing API integrations
+  mock_api:
+    build:
+      context: .
+      dockerfile: tests/fixtures/mock_api/Dockerfile
+    container_name: fdw_test_mock_api
+    ports:
+      - "8999:8000"
+    environment:
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+      - LOG_LEVEL=info
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - test_network
+    depends_on:
+      - postgres_test
+      - mysql_test
+
+  # Redis for caching tests (optional)
+  redis_test:
+    image: redis:7-alpine
+    container_name: fdw_test_redis
+    ports:
+      - "6380:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_test_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - test_network
+
+  # Test runner service (optional - for CI/CD)
+  test_runner:
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+    container_name: fdw_test_runner
+    environment:
+      - POSTGRES_HOST=postgres_test
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=test_fdw_db
+      - POSTGRES_USER=test_user
+      - POSTGRES_PASSWORD=test_password
+      - MYSQL_HOST=mysql_test
+      - MYSQL_PORT=3306
+      - MYSQL_DB=test_mysql_db
+      - MYSQL_USER=test_user
+      - MYSQL_PASSWORD=test_password
+      - MOCK_API_HOST=mock_api
+      - MOCK_API_PORT=8000
+      - REDIS_HOST=redis_test
+      - REDIS_PORT=6379
+      - PYTHONPATH=/app/src
+    volumes:
+      - .:/app
+      - test_results:/app/test-results
+      - test_coverage:/app/htmlcov
+    working_dir: /app
+    depends_on:
+      postgres_test:
+        condition: service_healthy
+      mysql_test:
+        condition: service_healthy
+      mock_api:
+        condition: service_healthy
+      redis_test:
+        condition: service_healthy
+    networks:
+      - test_network
+    profiles:
+      - testing
+
+volumes:
+  postgres_test_data:
+    driver: local
+  mysql_test_data:
+    driver: local
+  redis_test_data:
+    driver: local
+  test_results:
+    driver: local
+  test_coverage:
+    driver: local
+
+networks:
+  test_network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+# Additional services for advanced testing scenarios
+x-environment: &common-env
+  ENVIRONMENT: test
+  LOG_LEVEL: debug
+  PYTHONDONTWRITEBYTECODE: 1
+  PYTHONUNBUFFERED: 1
+
+# Service templates for scaling tests
+x-postgres-template: &postgres-template
+  image: postgres:15-alpine
+  environment:
+    <<: *common-env
+    POSTGRES_HOST_AUTH_METHOD: trust
+  healthcheck:
+    test: ["CMD-SHELL", "pg_isready"]
+    interval: 10s
+    timeout: 5s
+    retries: 3
+  networks:
+    - test_network
+
+# Additional PostgreSQL instances for multi-source testing
+services:
+  postgres_source_1:
+    <<: *postgres-template
+    container_name: fdw_test_postgres_1
+    environment:
+      <<: *common-env
+      POSTGRES_DB: source1_db
+      POSTGRES_USER: source1_user
+      POSTGRES_PASSWORD: source1_password
+    ports:
+      - "5434:5432"
+    volumes:
+      - postgres_source1_data:/var/lib/postgresql/data
+      - ./tests/fixtures/sql/source1_init.sql:/docker-entrypoint-initdb.d/init.sql
+    profiles:
+      - multi-source
+
+  postgres_source_2:
+    <<: *postgres-template
+    container_name: fdw_test_postgres_2
+    environment:
+      <<: *common-env
+      POSTGRES_DB: source2_db
+      POSTGRES_USER: source2_user
+      POSTGRES_PASSWORD: source2_password
+    ports:
+      - "5435:5432"
+    volumes:
+      - postgres_source2_data:/var/lib/postgresql/data
+      - ./tests/fixtures/sql/source2_init.sql:/docker-entrypoint-initdb.d/init.sql
+    profiles:
+      - multi-source
+
+  # Performance testing database with larger datasets
+  postgres_perf:
+    image: postgres:15-alpine
+    container_name: fdw_test_postgres_perf
+    environment:
+      <<: *common-env
+      POSTGRES_DB: perf_test_db
+      POSTGRES_USER: perf_user
+      POSTGRES_PASSWORD: perf_password
+      POSTGRES_HOST_AUTH_METHOD: trust
+    ports:
+      - "5436:5432"
+    volumes:
+      - postgres_perf_data:/var/lib/postgresql/data
+      - ./tests/fixtures/sql/perf_init.sql:/docker-entrypoint-initdb.d/init.sql
+    command: >
+      postgres
+      -c shared_preload_libraries=pg_stat_statements
+      -c pg_stat_statements.track=all
+      -c max_connections=200
+      -c shared_buffers=256MB
+      -c effective_cache_size=1GB
+      -c work_mem=16MB
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U perf_user -d perf_test_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - test_network
+    profiles:
+      - performance
+
+volumes:
+  postgres_source1_data:
+    driver: local
+  postgres_source2_data:
+    driver: local
+  postgres_perf_data:
+    driver: local

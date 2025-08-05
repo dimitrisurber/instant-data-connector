@@ -1,0 +1,309 @@
+# Docker Compose for Development Environment
+# PostgreSQL FDW-based Data Connector Development Stack
+version: '3.8'
+
+services:
+  # Main PostgreSQL database with FDW extensions
+  postgres-fdw:
+    build:
+      context: .
+      dockerfile: docker/postgres/Dockerfile
+      args:
+        BUILD_DATE: ${BUILD_DATE:-$(date -u +'%Y-%m-%dT%H:%M:%SZ')}
+        VERSION: ${VERSION:-dev}
+    container_name: postgres-fdw-dev
+    hostname: postgres-fdw
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: instant_connector
+      POSTGRES_USER: connector_user
+      POSTGRES_PASSWORD: dev_password_123
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256 --auth-local=scram-sha-256"
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./tests/fixtures/sql:/docker-entrypoint-initdb.d/test-data
+      - ./docker/postgres/configs:/etc/postgresql/conf.d
+      - postgres_logs:/var/lib/postgresql/data/pg_log
+    networks:
+      - connector-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U connector_user -d instant_connector"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=false"
+
+  # MySQL test database for FDW testing
+  mysql-test:
+    image: mysql:8.0
+    container_name: mysql-test-dev
+    hostname: mysql-test
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: root_password_123
+      MYSQL_DATABASE: test_mysql_db
+      MYSQL_USER: mysql_user
+      MYSQL_PASSWORD: mysql_password_123
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./tests/fixtures/sql/mysql-init.sql:/docker-entrypoint-initdb.d/init.sql
+      - mysql_logs:/var/log/mysql
+    networks:
+      - connector-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "mysql_user", "-pmysql_password_123"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    restart: unless-stopped
+    command: >
+      --default-authentication-plugin=mysql_native_password
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+      --max_connections=200
+      --innodb_buffer_pool_size=256M
+      --log-error=/var/log/mysql/error.log
+      --slow_query_log=1
+      --slow_query_log_file=/var/log/mysql/slow.log
+      --long_query_time=2
+
+  # Data Connector Application
+  connector-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: development
+      args:
+        BUILD_DATE: ${BUILD_DATE:-$(date -u +'%Y-%m-%dT%H:%M:%SZ')}
+        VERSION: ${VERSION:-dev}
+        VCS_REF: ${VCS_REF:-$(git rev-parse --short HEAD)}
+    container_name: connector-app-dev
+    hostname: connector-app
+    ports:
+      - "8000:8000"
+      - "8888:8888"  # Jupyter notebook
+    environment:
+      - PYTHONPATH=/app/src
+      - ENVIRONMENT=development
+      - DEBUG=true
+      - LOG_LEVEL=DEBUG
+      - DATABASE_URL=postgresql://connector_user:dev_password_123@postgres-fdw:5432/instant_connector
+      - MYSQL_URL=mysql://mysql_user:mysql_password_123@mysql-test:3306/test_mysql_db
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/1
+    volumes:
+      - .:/app
+      - connector_logs:/app/logs
+      - connector_data:/app/data
+      - connector_cache:/app/cache
+    networks:
+      - connector-network
+    depends_on:
+      postgres-fdw:
+        condition: service_healthy
+      mysql-test:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+    stdin_open: true
+    tty: true
+
+  # Redis for caching and task queue
+  redis:
+    image: redis:7-alpine
+    container_name: redis-dev
+    hostname: redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+      - ./docker/redis/redis.conf:/usr/local/etc/redis/redis.conf
+    networks:
+      - connector-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+    command: redis-server /usr/local/etc/redis/redis.conf
+
+  # Mock API server for testing
+  mock-api:
+    build:
+      context: .
+      dockerfile: docker/mock-api/Dockerfile
+    container_name: mock-api-dev
+    hostname: mock-api
+    ports:
+      - "8999:8999"
+    environment:
+      - API_PORT=8999
+      - LOG_LEVEL=INFO
+    volumes:
+      - ./tests/fixtures/api-data:/app/data
+    networks:
+      - connector-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8999/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # Jupyter notebook for development and analysis
+  jupyter:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: development
+    container_name: jupyter-dev
+    hostname: jupyter
+    ports:
+      - "8888:8888"
+    environment:
+      - JUPYTER_ENABLE_LAB=yes
+      - JUPYTER_TOKEN=development_token_123
+      - PYTHONPATH=/app/src
+      - DATABASE_URL=postgresql://connector_user:dev_password_123@postgres-fdw:5432/instant_connector
+    volumes:
+      - .:/app
+      - jupyter_data:/home/appuser/.jupyter
+      - connector_data:/app/data
+    networks:
+      - connector-network
+    depends_on:
+      - postgres-fdw
+      - redis
+    command: >
+      bash -c "
+        pip install jupyterlab ipywidgets &&
+        jupyter lab --ip=0.0.0.0 --port=8888 --no-browser --allow-root
+        --notebook-dir=/app --ServerApp.token='${JUPYTER_TOKEN:-development_token_123}'
+      "
+    restart: unless-stopped
+
+  # Adminer for database management
+  adminer:
+    image: adminer:4.8.1
+    container_name: adminer-dev
+    hostname: adminer
+    ports:
+      - "8080:8080"
+    environment:
+      ADMINER_DEFAULT_SERVER: postgres-fdw
+      ADMINER_DESIGN: pepa-linha
+    networks:
+      - connector-network
+    depends_on:
+      - postgres-fdw
+      - mysql-test
+    restart: unless-stopped
+
+  # Redis Commander for Redis management
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: redis-commander-dev
+    hostname: redis-commander
+    ports:
+      - "8081:8081"
+    environment:
+      REDIS_HOSTS: local:redis:6379
+      HTTP_USER: admin
+      HTTP_PASSWORD: dev_admin_123
+    networks:
+      - connector-network
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  # Grafana for monitoring and visualization
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana-dev
+    hostname: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: dev_admin_123
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_INSTALL_PLUGINS: "grafana-piechart-panel,grafana-worldmap-panel"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources
+    networks:
+      - connector-network
+    depends_on:
+      - postgres-fdw
+    restart: unless-stopped
+
+  # Prometheus for metrics collection
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus-dev
+    hostname: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - prometheus_data:/prometheus
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./monitoring/prometheus/alerts.yml:/etc/prometheus/alerts.yml
+    networks:
+      - connector-network
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    restart: unless-stopped
+
+# Network configuration
+networks:
+  connector-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+# Volume configuration
+volumes:
+  postgres_data:
+    driver: local
+  postgres_logs:
+    driver: local
+  mysql_data:
+    driver: local
+  mysql_logs:
+    driver: local
+  redis_data:
+    driver: local
+  connector_logs:
+    driver: local
+  connector_data:
+    driver: local
+  connector_cache:
+    driver: local
+  jupyter_data:
+    driver: local
+  grafana_data:
+    driver: local
+  prometheus_data:
+    driver: local
